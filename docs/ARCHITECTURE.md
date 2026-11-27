@@ -260,3 +260,26 @@ abstract class FeatureModule {
 只改元数据的攻击虽然不影响 ②，但会与台账 ③ 的原始记录对不上，可交叉发现。
 这也是为什么口径必须是"去元数据的像素流"，而不是"整文件哈希"——
 否则写入哈希这个动作本身就会改变哈希，永远无法自洽。
+
+---
+
+## 7. 构建环境注意事项（`scripts/bootstrap_android.sh`）
+
+仓库不提交 `android/`，平台目录在构建前由脚本现生成。踩过的坑记在这里，改动脚本前先读：
+
+| 现象 | 根因 | 现在的做法 |
+| --- | --- | --- |
+| `Unexpected tokens (use ';' to separate expressions on the same line)` | 用 Groovy 正则 `applicationId ` 去改 Kotlin DSL 的 `applicationId = `，把 kts 改成了 Groovy 语法 | 包名不再 sed：`flutter create --org com.qingyang --project-name watermark` 直接生成 `com.qingyang.watermark`，`namespace`/`applicationId`/MainActivity 包路径天然一致 |
+| `'fun Project.android(...)' is deprecated ...` 被当作 error | AGP 9 把 Kotlin DSL 的 `android {}` 访问器标成 `DeprecationLevel.ERROR`；一旦再追加第二个 `android {}` 块，连模板自带的那个也会解析到废弃重载 | 脚本不再注入 Gradle 签名配置；根构建脚本整体改为 Groovy（只做仓库/输出目录/子工程编排，不引用 AGP DSL 类型） |
+| `Unresolved reference 'util'` | kts 里 `java` 被 `JavaPluginExtension` 遮蔽，`java.util.Properties` 无法解析 | 不再在 Gradle 里读 `key.properties`；签名统一交给 `sign_apk.sh`（`zipalign -p -f 4` + `apksigner`，v1/v2） |
+| `:file_picker:checkReleaseAarMetadata` 要求 compileSdk ≥ 36 | 部分插件自身仍声明 `android-34`，而 `flutter_plugin_android_lifecycle` 要求依赖方编译在 36 以上 | 根脚本在 `subprojects` 里统一抬 `compileSdk` 到 36（并打印被抬高的模块） |
+| `Cannot run Project.afterEvaluate(Closure) when the project is already evaluated` | `evaluationDependsOn(":app")` 会立即评估工程，之后再对同一工程注册 `afterEvaluate` 会抛错 | compileSdk 覆盖块必须排在 `evaluationDependsOn(":app")` **之前** |
+| `:camera_android_camerax:lintVitalAnalyzeRelease` 崩溃（`java.util.List.removeLast`） | lint 的 `CommentDetector` 在 CI 的 JDK/AGP 组合下的自身 bug | 关闭所有 `lintVital*` 任务；构建门禁在 Dart 侧（`flutter analyze` + `flutter test`） |
+| `:app:compileReleaseKotlin` → `Unclosed comment` | Kotlin 支持**嵌套**块注释，`MainActivity.kt` 的 KDoc 里写了 `image/*`，等于又开了一层 `/*` | Kotlin 注释正文里不要出现 `/*`，改写成「ACTION_SEND（image 类型）」 |
+
+另外两条约定：
+
+* **签名只有一条链路**：Gradle 侧一律用默认调试签名，产物在构建末尾由 `scripts/sign_apk.sh`
+  重签；未配置 `KEYSTORE_BASE64` 时脚本跳过重签，产物保持调试签名（可安装、不适合分发）。
+* **版本号来源唯一**：`release.yml` 用标签版本号作 `--build-name`、流水线序号作
+  `--build-number`，产物名 `qingyang-watermark-vX.Y.Z.apk` 与 `SHA256SUMS.txt` 一并发布。

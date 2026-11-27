@@ -11,7 +11,10 @@
 
 ## 下载与安装
 
-APK 由 GitHub Releases 直接提供（每次发版自动构建）：
+APK 由 GitHub Releases 直接提供（每次发版自动构建）。当前最新版本：
+[**v1.0.0**](../../releases/tag/v1.0.0)（APK + `SHA256SUMS.txt`）。
+
+安装步骤：
 
 1. 打开 [Releases](../../releases) 页面，下载最新的 `qingyang-watermark-vX.Y.Z.apk`；
 2. 手机允许「安装未知来源应用」；
@@ -23,6 +26,10 @@ sha256sum -c SHA256SUMS.txt
 ```
 
 系统要求：Android 7.0（API 24）及以上；相机、GPS。鸿蒙（HarmonyOS NEXT 之前的双框架版本）可直接安装运行。
+
+> 当前流水线状态：`CI`（analyze + test）与 `Build APK` 在 `main` 上均为通过；
+> `release.yml` 已实测可用（v1.0.0 由打标签自动产出）。APK 尚未在真机上做完整
+> 功能回归，相机/导入/校验三条链路建议按 `docs/ARCHITECTURE.md` 的验收点自测。
 
 ---
 
