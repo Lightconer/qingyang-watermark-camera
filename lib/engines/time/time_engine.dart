@@ -201,7 +201,7 @@ class FakeTimeSource implements TimeSource {
   }) async {
     if (!available) return null;
     return NtpResult(
-      serverTime: Duration(milliseconds: fixedTime.millisecondsSinceEpoch),
+      serverTime: fixedTime.toUtc(),
       offset: const Duration(milliseconds: 120),
       roundTrip: roundTrip,
       queriedAt: DateTime.now().toUtc(),

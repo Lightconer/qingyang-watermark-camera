@@ -129,26 +129,28 @@ GRADLE_KTS="android/app/build.gradle.kts"
 
 patch_gradle_common() {
   local file="$1"
-  # applicationId
-  if grep -qE '^\s*applicationId ' "$file"; then
-    replace_in_file "$file" "s#^\([[:space:]]*\)applicationId .*#\1applicationId \"$APP_ID\"#"
+  local is_kts=0
+  case "$file" in
+    *.kts) is_kts=1 ;;
+  esac
+
+  # 注意：Groovy 的 `applicationId "x"` 与 Kotlin DSL 的 `applicationId = "x"`
+  # 只差一个等号，早期的正则 `applicationId ` 会把 kts 也匹到并改写成 Groovy 语法，
+  # 直接导致 "Unexpected tokens" 编译失败。这里按 DSL 严格分流。
+  if [ "$is_kts" -eq 1 ]; then
+    replace_in_file "$file" "s#^\([[:space:]]*\)applicationId[[:space:]]*=.*#\1applicationId = \"$APP_ID\"#"
+    replace_in_file "$file" "s#^\([[:space:]]*\)namespace[[:space:]]*=.*#\1namespace = \"$APP_ID\"#"
+    replace_in_file "$file" 's#minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion#minSdk = 24#g'
+  else
+    replace_in_file "$file" "s#^\([[:space:]]*\)applicationId[[:space:]].*#\1applicationId \"$APP_ID\"#"
+    replace_in_file "$file" "s#^\([[:space:]]*\)namespace[[:space:]].*#\1namespace \"$APP_ID\"#"
+    replace_in_file "$file" 's#minSdkVersion[[:space:]]\{1,\}flutter\.minSdkVersion#minSdkVersion 24#g'
+    replace_in_file "$file" 's#minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion#minSdk = 24#g'
   fi
-  if grep -qE '^\s*applicationId = ' "$file"; then
-    replace_in_file "$file" "s#^\([[:space:]]*\)applicationId = .*#\1applicationId = \"$APP_ID\"#"
-  fi
-  # namespace
-  if grep -qE '^\s*namespace ' "$file"; then
-    replace_in_file "$file" "s#^\([[:space:]]*\)namespace .*#\1namespace \"$APP_ID\"#"
-  fi
-  if grep -qE '^\s*namespace = ' "$file"; then
-    replace_in_file "$file" "s#^\([[:space:]]*\)namespace = .*#\1namespace = \"$APP_ID\"#"
-  fi
-  # minSdk：camera / permission_handler 需要 21+，这里统一起到 24
+
+  # camera / permission_handler 需要 21+，统一起到 24
   if grep -q 'flutter.minSdkVersion' "$file"; then
-    replace_in_file "$file" 's#flutter.minSdkVersion#24#g'
-  fi
-  if grep -q 'minSdk = flutter.minSdkVersion' "$file"; then
-    replace_in_file "$file" 's#minSdk = flutter.minSdkVersion#minSdk = 24#g'
+    replace_in_file "$file" 's#flutter\.minSdkVersion#24#g'
   fi
 }
 
@@ -223,7 +225,7 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
         } else {
-            logger.warn("[qingyang] 未找到 key.properties，release 将使用调试签名")
+            project.logger.warn("[qingyang] 未找到 key.properties，release 将使用调试签名")
         }
     }
 }
