@@ -1,0 +1,47 @@
+name: qingyang_watermark
+description: 青阳水印相机 — 拍摄与导入照片自动叠加可信经纬水印，本地优先、无广告、不强制云端。
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 相机链路
+  camera: ^0.11.0
+  # 权限
+  permission_handler: ^11.3.1
+  # 定位（北斗/GPS/网络融合由系统 LocationManager 完成）
+  geolocator: ^12.0.0
+  # 系统相册多选（Android 13+ Photo Picker / iOS PHPicker）
+  image_picker: ^1.1.2
+  # SAF 文件夹批量导入
+  file_picker: ^8.1.2
+  # 存储目录
+  path_provider: ^2.1.4
+  path: ^1.9.0
+  # 设置持久化
+  shared_preferences: ^2.3.2
+  # 哈希
+  crypto: ^3.0.5
+  # 纯 Dart JPEG 编码（dart:ui 只提供 PNG 编码）
+  image: ^4.2.0
+  # 溯源二维码
+  qr_flutter: ^4.1.0
+  # 导出分享
+  share_plus: ^7.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/profiles/
+    - assets/templates/

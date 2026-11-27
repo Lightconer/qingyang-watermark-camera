@@ -1,0 +1,12 @@
+{
+  "id": "free",
+  "label": "自由",
+  "description": "自由模式：字段不设限，时间有则用、无则标注，坐标可为空。仍然保留来源标识与哈希溯源。",
+  "timePolicy": "anyAvailable",
+  "coordPolicy": "optional",
+  "allowedFields": null,
+  "requireProvenanceBadge": true,
+  "allowMetaEditing": false,
+  "weatherAllowed": true,
+  "shutterLocked": false
+}

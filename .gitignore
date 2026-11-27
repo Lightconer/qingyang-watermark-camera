@@ -1,0 +1,31 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+*.iml
+.idea/
+.vscode/
+
+# 平台目录：由 scripts/bootstrap_android.sh 现场生成，不入库
+android/
+ios/
+macos/
+linux/
+windows/
+web/
+
+# 签名与密钥：绝不入库
+key.properties
+*.jks
+*.keystore
+*.p12
+secrets/
+.env
+
+# 产物
+*.apk
+*.aab
+output/

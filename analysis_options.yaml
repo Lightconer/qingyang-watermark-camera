@@ -1,0 +1,21 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: false
+    strict-raw-types: false
+  exclude:
+    - "**/*.g.dart"
+    - "build/**"
+    - "android/**"
+    - "ios/**"
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    prefer_final_locals: false
+    avoid_print: true
+    use_key_in_widget_constructors: true
+    library_private_types_in_public_api: false
+    unnecessary_this: false
+    sort_child_properties_last: false

@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "profiles": [
+    "assets/profiles/forensics.json",
+    "assets/profiles/processed.json",
+    "assets/profiles/free.json"
+  ]
+}

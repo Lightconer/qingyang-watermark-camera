@@ -1,0 +1,26 @@
+{
+  "id": "forensics",
+  "label": "取证",
+  "description": "现场取证：时间优先 NTP 授时，坐标必须来自设备定位，画面强制来源标识，禁止任何手填。",
+  "timePolicy": "trustedRequired",
+  "coordPolicy": "deviceFixRequired",
+  "allowedFields": [
+    "source_badge",
+    "time",
+    "coords",
+    "altitude",
+    "address",
+    "weather",
+    "device",
+    "operator",
+    "organization",
+    "project",
+    "note",
+    "hash",
+    "qr"
+  ],
+  "requireProvenanceBadge": true,
+  "allowMetaEditing": false,
+  "weatherAllowed": false,
+  "shutterLocked": true
+}

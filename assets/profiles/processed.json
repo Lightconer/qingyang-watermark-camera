@@ -1,0 +1,24 @@
+{
+  "id": "processed",
+  "label": "加工",
+  "description": "导入加工：时间只认原图 DateTimeOriginal，坐标只认原图 EXIF GPS，缺坐标时显示「无原始定位」，绝不编造地址与天气。",
+  "timePolicy": "originalOnly",
+  "coordPolicy": "originalOnly",
+  "allowedFields": [
+    "source_badge",
+    "time",
+    "coords",
+    "address",
+    "device",
+    "operator",
+    "organization",
+    "project",
+    "note",
+    "hash",
+    "qr"
+  ],
+  "requireProvenanceBadge": true,
+  "allowMetaEditing": false,
+  "weatherAllowed": false,
+  "shutterLocked": false
+}

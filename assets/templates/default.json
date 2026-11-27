@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "1.0",
+  "templates": [
+    {
+      "schemaVersion": "1.0",
+      "id": "default",
+      "name": "取证标准",
+      "profileId": "forensics",
+      "isBuiltin": true,
+      "style": {
+        "position": "bottomBar",
+        "fontSizeRatio": 0.03,
+        "minFontSize": 12,
+        "maxFontSize": 64,
+        "color": 4294967295,
+        "strokeColor": 3422552064,
+        "strokeWidthRatio": 0.12,
+        "opacity": 1.0,
+        "lineSpacing": 1.15,
+        "paddingRatio": 0.022,
+        "cornerRadiusRatio": 0.012,
+        "bandColor": 4278190080,
+        "bandOpacity": 0.38,
+        "showBadge": true,
+        "showQr": false,
+        "qrSizeRatio": 0.11,
+        "showLogo": false
+      },
+      "fields": [
+        "source_badge",
+        "time",
+        "coords",
+        "address",
+        "organization",
+        "operator",
+        "hash"
+      ],
+      "values": {}
+    },
+    {
+      "schemaVersion": "1.0",
+      "id": "compact",
+      "name": "精简两行",
+      "profileId": "forensics",
+      "isBuiltin": true,
+      "style": {
+        "position": "bottomLeft",
+        "fontSizeRatio": 0.028,
+        "minFontSize": 11,
+        "maxFontSize": 48,
+        "color": 4294967295,
+        "strokeColor": 3422552064,
+        "strokeWidthRatio": 0.14,
+        "opacity": 1.0,
+        "lineSpacing": 1.1,
+        "paddingRatio": 0.018,
+        "cornerRadiusRatio": 0.014,
+        "bandColor": 4278190080,
+        "bandOpacity": 0.42,
+        "showBadge": true,
+        "showQr": false,
+        "qrSizeRatio": 0.1,
+        "showLogo": false
+      },
+      "fields": ["source_badge", "time", "coords"],
+      "values": {}
+    },
+    {
+      "schemaVersion": "1.0",
+      "id": "import_trace",
+      "name": "导入留痕",
+      "profileId": "processed",
+      "isBuiltin": true,
+      "style": {
+        "position": "bottomBar",
+        "fontSizeRatio": 0.028,
+        "minFontSize": 12,
+        "maxFontSize": 56,
+        "color": 4294967295,
+        "strokeColor": 3422552064,
+        "strokeWidthRatio": 0.12,
+        "opacity": 1.0,
+        "lineSpacing": 1.12,
+        "paddingRatio": 0.02,
+        "cornerRadiusRatio": 0.012,
+        "bandColor": 4278190080,
+        "bandOpacity": 0.36,
+        "showBadge": true,
+        "showQr": true,
+        "qrSizeRatio": 0.12,
+        "showLogo": false
+      },
+      "fields": [
+        "source_badge",
+        "time",
+        "coords",
+        "address",
+        "project",
+        "note",
+        "hash",
+        "qr"
+      ],
+      "values": {
+        "note": "导入加工，非现场取证"
+      }
+    }
+  ]
+}
