@@ -41,7 +41,10 @@ class FieldCatalog {
   }) {
     final result = <ResolvedField>[];
     for (final provider in providers) {
-      if (!enabledFieldIds.contains(provider.id)) continue;
+      // 硬性约束：拍摄与导入必须在画面上明确区分，来源标识不可被任何模板关闭，
+      // 因此它不在 WatermarkFieldIds.all 里，也不参与"字段开关"过滤。
+      final alwaysOn = provider.id == WatermarkFieldIds.sourceBadge;
+      if (!alwaysOn && !enabledFieldIds.contains(provider.id)) continue;
       if (allowedFieldIds != null && !allowedFieldIds.contains(provider.id)) {
         continue;
       }

@@ -35,8 +35,9 @@ sha256sum -c SHA256SUMS.txt
 | `release.yml` | 推送 `v*` 标签、手动填版本号 | 构建 → 重签 → 生成 `qingyang-watermark-vX.Y.Z.apk` 与 `SHA256SUMS.txt` → 发布 GitHub Release |
 
 仓库**不提交 `android/` 目录**：三条流水线都会先跑 `scripts/bootstrap_android.sh`，
-用 `flutter create` 现场生成平台骨架，再把应用名改写为「青阳水印相机」、包名改为
-`com.qingyang.watermark`、注入权限与 `ACTION_SEND` 入口。
+用 `flutter create --org com.qingyang --project-name watermark` 现场生成平台骨架
+（包名 `com.qingyang.watermark` 由参数直接生成，不改 Gradle DSL，避免 Kotlin/Groovy
+两种 DSL 语法差异把构建改坏），再注入应用名「青阳水印相机」、权限与 `ACTION_SEND` 入口。
 
 ---
 
@@ -86,8 +87,12 @@ base64 -w0 release.jks   # 复制输出到 KEYSTORE_BASE64
 ```
 
 **未配置时**：`bootstrap_android.sh` 会清理 `key.properties` 并打印
-`警告：未配置 KEYSTORE_BASE64，release 将回退调试签名`，gradle 侧也会 `logger.warn`。
-此时产出的 APK 用调试签名，可安装但不适合正式分发。
+`警告：未配置 KEYSTORE_BASE64，release 将回退调试签名`；`sign_apk.sh` 检测不到证书时
+自动跳过重签，产物保持 Flutter 的调试签名——可安装，但不适合正式分发。
+
+签名统一在构建末尾做（`zipalign -p -f 4` + `apksigner sign`，v1/v2 同时开启），
+不在 Gradle 里配置 `signingConfigs`，这样无论平台目录是 Kotlin DSL 还是 Groovy DSL
+生成，签名链路都只有一条、可复现。
 
 ---
 

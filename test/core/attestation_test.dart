@@ -4,7 +4,7 @@ import 'package:qingyang_watermark/core/models/types.dart';
 import 'package:qingyang_watermark/core/service/attestation.dart';
 
 const _placeholderSha =
-    'a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0';
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 WatermarkStamp stamp({
   String sha = _placeholderSha,

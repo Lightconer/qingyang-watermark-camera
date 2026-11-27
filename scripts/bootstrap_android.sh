@@ -2,7 +2,15 @@
 # 青阳水印相机 · Android 平台目录现场生成器
 #
 # 仓库不提交 android/ 目录：CI 与本地都在构建前运行本脚本，
-# 由 `flutter create` 生成平台骨架，再注入应用名、包名、权限、意图入口与签名配置。
+# 由 `flutter create` 生成平台骨架，再注入应用名、权限、意图入口。
+#
+# 包名不从外部 sed 打补丁：--org com.qingyang + --project-name watermark
+# 生成出来就是 com.qingyang.watermark，namespace / applicationId / MainActivity
+# 的包路径三者天然一致，也就不需要（也不应该）去改 Gradle DSL——
+# Kotlin DSL 与 Groovy DSL 语法不同，改错一个字整个构建就编译不过。
+#
+# 签名也不在 Gradle 里做：release 产物统一交给 scripts/sign_apk.sh
+# 用 zipalign + apksigner 重签，未配置 keystore 时该脚本自动跳过。
 #
 # 用法：bash scripts/bootstrap_android.sh
 # 可选环境变量：
@@ -17,7 +25,7 @@ cd "$ROOT_DIR"
 
 APP_NAME="青阳水印相机"
 APP_ID="com.qingyang.watermark"
-PROJECT_NAME="qingyang_watermark"
+PROJECT_NAME="watermark"
 ORG="com.qingyang"
 
 require_flutter() {
@@ -123,119 +131,33 @@ cat > "$MANIFEST" <<'MANIFEST_EOF'
 MANIFEST_EOF
 echo "[bootstrap] AndroidManifest 已注入（应用名 / 权限 / ACTION_SEND）"
 
-# ---------------------------------------------------------------- 包名
-GRADLE_GROOVY="android/app/build.gradle"
-GRADLE_KTS="android/app/build.gradle.kts"
-
-patch_gradle_common() {
-  local file="$1"
-  local is_kts=0
-  case "$file" in
-    *.kts) is_kts=1 ;;
-  esac
-
-  # 注意：Groovy 的 `applicationId "x"` 与 Kotlin DSL 的 `applicationId = "x"`
-  # 只差一个等号，早期的正则 `applicationId ` 会把 kts 也匹到并改写成 Groovy 语法，
-  # 直接导致 "Unexpected tokens" 编译失败。这里按 DSL 严格分流。
-  if [ "$is_kts" -eq 1 ]; then
-    replace_in_file "$file" "s#^\([[:space:]]*\)applicationId[[:space:]]*=.*#\1applicationId = \"$APP_ID\"#"
-    replace_in_file "$file" "s#^\([[:space:]]*\)namespace[[:space:]]*=.*#\1namespace = \"$APP_ID\"#"
-    replace_in_file "$file" 's#minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion#minSdk = 24#g'
-  else
-    replace_in_file "$file" "s#^\([[:space:]]*\)applicationId[[:space:]].*#\1applicationId \"$APP_ID\"#"
-    replace_in_file "$file" "s#^\([[:space:]]*\)namespace[[:space:]].*#\1namespace \"$APP_ID\"#"
-    replace_in_file "$file" 's#minSdkVersion[[:space:]]\{1,\}flutter\.minSdkVersion#minSdkVersion 24#g'
-    replace_in_file "$file" 's#minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion#minSdk = 24#g'
+# ---------------------------------------------------------------- Gradle
+# 只做一件事：把 minSdk 抬到 24（camera / permission_handler 的下限）。
+# 这是纯 token 替换，Groovy DSL(`minSdkVersion 24`) 与 Kotlin DSL(`minSdk = 24`)
+# 都成立，不引入任何新语法，避免脚本把构建脚本改坏。
+for f in android/app/build.gradle android/app/build.gradle.kts; do
+  [ -f "$f" ] || continue
+  if grep -q 'flutter\.minSdkVersion' "$f"; then
+    replace_in_file "$f" 's#flutter\.minSdkVersion#24#g'
+    echo "[bootstrap] $(basename "$f")：minSdk 已抬到 24"
   fi
+done
 
-  # camera / permission_handler 需要 21+，统一起到 24
-  if grep -q 'flutter.minSdkVersion' "$file"; then
-    replace_in_file "$file" 's#flutter\.minSdkVersion#24#g'
-  fi
-}
-
-if [ -f "$GRADLE_GROOVY" ]; then
-  patch_gradle_common "$GRADLE_GROOVY"
-  cat >> "$GRADLE_GROOVY" <<'GRADLE_EOF'
-
-// ---------------------------------------------------------------------------
-// 由 scripts/bootstrap_android.sh 注入
-// 签名密钥不入库：从环境变量写入 android/key.properties 后再读取。
-// 未配置时保持 Flutter 默认的调试签名，并在日志里告警。
-// ---------------------------------------------------------------------------
-def qyKeyFile = rootProject.file('key.properties')
-def qyKeyProps = new Properties()
-if (qyKeyFile.exists()) {
-    qyKeyProps.load(new FileInputStream(qyKeyFile))
-}
-
-android {
-    signingConfigs {
-        if (qyKeyFile.exists()) {
-            release {
-                storeFile file(qyKeyProps['storeFile'])
-                storePassword qyKeyProps['storePassword']
-                keyAlias qyKeyProps['keyAlias']
-                keyPassword qyKeyProps['keyPassword']
-            }
-        }
-    }
-    buildTypes {
-        release {
-            if (qyKeyFile.exists()) {
-                signingConfig signingConfigs.release
-            } else {
-                logger.warn('[qingyang] 未找到 key.properties，release 将使用调试签名')
-            }
-        }
-    }
-}
-GRADLE_EOF
-  echo "[bootstrap] build.gradle 已注入包名与签名配置"
-fi
-
-if [ -f "$GRADLE_KTS" ]; then
-  patch_gradle_common "$GRADLE_KTS"
-  cat >> "$GRADLE_KTS" <<'KTS_EOF'
-
-// ---------------------------------------------------------------------------
-// 由 scripts/bootstrap_android.sh 注入（Kotlin DSL）
-// 签名密钥不入库：未配置时回退调试签名。
-// ---------------------------------------------------------------------------
-val qyKeyFile = rootProject.file("key.properties")
-val qyKeyProps = java.util.Properties()
-if (qyKeyFile.exists()) {
-    qyKeyProps.load(java.io.FileInputStream(qyKeyFile))
-}
-
-android {
-    signingConfigs {
-        if (qyKeyFile.exists()) {
-            create("release") {
-                storeFile = file(qyKeyProps["storeFile"] as String)
-                storePassword = qyKeyProps["storePassword"] as String
-                keyAlias = qyKeyProps["keyAlias"] as String
-                keyPassword = qyKeyProps["keyPassword"] as String
-            }
-        }
-    }
-    buildTypes {
-        if (qyKeyFile.exists()) {
-            getByName("release") {
-                signingConfig = signingConfigs.getByName("release")
-            }
-        } else {
-            project.logger.warn("[qingyang] 未找到 key.properties，release 将使用调试签名")
-        }
-    }
-}
-KTS_EOF
-  echo "[bootstrap] build.gradle.kts 已注入包名与签名配置"
+# 打印实际生效的 DSL / AGP 版本，便于构建失败时定位（不参与构建逻辑）
+for f in android/app/build.gradle android/app/build.gradle.kts; do
+  [ -f "$f" ] && echo "[bootstrap] 使用 $f"
+done
+if [ -f android/settings.gradle.kts ]; then
+  grep -E 'com\.android\.application|org\.jetbrains\.kotlin\.android' android/settings.gradle.kts \
+    | sed 's/^[[:space:]]*/[bootstrap] AGP/Kotlin 插件：/' || true
+elif [ -f android/settings.gradle ]; then
+  grep -E 'com\.android\.application|org\.jetbrains\.kotlin\.android' android/settings.gradle \
+    | sed 's/^[[:space:]]*/[bootstrap] AGP/Kotlin 插件：/' || true
 fi
 
 # ---------------------------------------------------------------- MainActivity
 KOTLIN_DIR="android/app/src/main/kotlin/com/qingyang/watermark"
-rm -rf android/app/src/main/kotlin/com/qingyang/qingyang_watermark
+rm -rf android/app/src/main/kotlin/com/qingyang/qingyang_watermark 2>/dev/null || true
 mkdir -p "$KOTLIN_DIR"
 cat > "$KOTLIN_DIR/MainActivity.kt" <<'KOTLIN_EOF'
 package com.qingyang.watermark
