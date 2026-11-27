@@ -62,10 +62,8 @@ class GeolocatorLocationEngine implements LocationEngine {
   }) async {
     try {
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: LocationSettings(
-          accuracy: LocationAccuracy.best,
-          timeLimit: timeout,
-        ),
+        desiredAccuracy: LocationAccuracy.best,
+        timeLimit: timeout,
       );
       return _toFix(position);
     } catch (_) {

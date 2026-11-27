@@ -3,7 +3,13 @@ import 'package:qingyang_watermark/core/models/photo_metadata.dart';
 import 'package:qingyang_watermark/core/models/types.dart';
 import 'package:qingyang_watermark/core/service/attestation.dart';
 
-WatermarkStamp stamp({String sha = 'a' * 64, PhotoSource source = PhotoSource.camera}) {
+const _placeholderSha =
+    'a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0';
+
+WatermarkStamp stamp({
+  String sha = _placeholderSha,
+  PhotoSource source = PhotoSource.camera,
+}) {
   return WatermarkStamp(
     source: source,
     mode: CaptureMode.forensics,

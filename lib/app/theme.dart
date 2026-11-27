@@ -37,7 +37,7 @@ class AppTheme {
           color: scheme.onSurface,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 0,
         color: isDark ? const Color(0xFF181D1C) : const Color(0xFFFFFFFF),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

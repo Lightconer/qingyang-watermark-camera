@@ -13,7 +13,6 @@ import '../../core/models/pipeline_job.dart';
 import '../../core/models/profile_config.dart';
 import '../../core/models/template.dart';
 import '../../core/models/types.dart';
-import '../../core/policy/policies.dart';
 import '../../engines/image/pipeline.dart';
 import '../../engines/location/location_engine.dart';
 import '../../engines/storage/ledger_store.dart';
@@ -62,6 +61,7 @@ class CaptureController extends ChangeNotifier {
   bool _fixFailed = false;
   bool _online = false;
   double _zoom = 1;
+  double _maxZoom = 1;
   bool _flashOn = false;
   bool _gridOn = true;
   bool _weatherLoading = false;
@@ -81,6 +81,7 @@ class CaptureController extends ChangeNotifier {
   bool get fixFailed => _fixFailed;
   bool get online => _online;
   double get zoom => _zoom;
+  double get maxZoom => _maxZoom;
   bool get flashOn => _flashOn;
   bool get gridOn => _gridOn;
   bool get weatherLoading => _weatherLoading;
@@ -128,9 +129,13 @@ class CaptureController extends ChangeNotifier {
     try {
       await controller.setFlashMode(FlashMode.off);
       await controller.setZoomLevel(1);
+      // 缩放上限由平台上报（0.11 起改为异步查询），失败按 1x 处理即禁用缩放条。
+      _maxZoom = await controller.getMaxZoomLevel();
     } catch (_) {
       // 部分设备不支持设置，忽略
+      _maxZoom = 1;
     }
+    if (!_maxZoom.isFinite || _maxZoom < 1) _maxZoom = 1;
     _zoom = 1;
     notifyListeners();
   }

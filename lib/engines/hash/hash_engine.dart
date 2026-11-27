@@ -14,7 +14,11 @@ abstract class HashEngine {
   String sha256OfPixelStream(Uint8List jpegBytes);
 
   Future<String> sha256OfFile(String path);
+}
 
+/// 展示用短哈希。做成扩展是为了让实现类只关心三种哈希口径本身，
+/// 不必为每个新实现重复写一遍截断逻辑。
+extension HashShortHash on HashEngine {
   String shortHash(String digest, {int length = 16}) =>
       digest.length <= length ? digest : digest.substring(0, length);
 }

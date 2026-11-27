@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qingyang_watermark/core/models/profile_config.dart';
 import 'package:qingyang_watermark/core/models/template.dart';
-import 'package:qingyang_watermark/core/models/types.dart';
 
 void main() {
   test('模板 JSON 往返不丢失样式与字段', () {

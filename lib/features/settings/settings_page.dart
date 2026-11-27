@@ -3,7 +3,6 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../app/router.dart';
 import '../../app/services.dart';
-import '../../core/extensions/watermark_field_provider.dart';
 import '../../core/models/template.dart';
 import '../../core/models/types.dart';
 

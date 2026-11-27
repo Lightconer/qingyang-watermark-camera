@@ -227,7 +227,7 @@ void main() {
           ExifMetadataProvider(),
         ]),
       );
-      final runner = PipelineRunner(defaultMiddlewares(4096));
+      final runner = PipelineRunner(defaultMiddlewares(maxLongSide: 4096));
       final result = await runner.run(
         job(
           input: inputPath,

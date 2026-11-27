@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/painting.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/layout/layout_engine.dart';
@@ -147,10 +148,10 @@ class CanvasWatermarkRenderer implements WatermarkRenderer {
       ui.Paint()..color = color.withOpacity(0.92 * layout.style.opacity),
     );
     final fontSize = rect.height * 0.58;
-    final painter = ui.TextPainter(
-      text: ui.TextSpan(
+    final painter = TextPainter(
+      text: TextSpan(
         text: layout.badgeText,
-        style: ui.TextStyle(
+        style: TextStyle(
           color: const ui.Color(0xFFFFFFFF),
           fontSize: fontSize,
           fontWeight: ui.FontWeight.w700,
@@ -202,7 +203,7 @@ class CanvasWatermarkRenderer implements WatermarkRenderer {
     required bool bold,
   }) {
     if (text.isEmpty) return;
-    final base = ui.TextStyle(
+    final base = TextStyle(
       fontSize: fontSize,
       fontWeight: bold ? ui.FontWeight.w700 : ui.FontWeight.w500,
       height: 1.12,
@@ -215,15 +216,15 @@ class CanvasWatermarkRenderer implements WatermarkRenderer {
       ..strokeJoin = ui.StrokeJoin.round
       ..color = strokeColor;
 
-    final strokePainter = ui.TextPainter(
-      text: ui.TextSpan(text: text, style: base.copyWith(foreground: strokePaint)),
+    final strokePainter = TextPainter(
+      text: TextSpan(text: text, style: base.copyWith(foreground: strokePaint)),
       textDirection: ui.TextDirection.ltr,
       maxLines: 1,
     )..layout();
     strokePainter.paint(canvas, offset);
 
-    final fillPainter = ui.TextPainter(
-      text: ui.TextSpan(text: text, style: base.copyWith(color: color)),
+    final fillPainter = TextPainter(
+      text: TextSpan(text: text, style: base.copyWith(color: color)),
       textDirection: ui.TextDirection.ltr,
       maxLines: 1,
     )..layout();
@@ -248,10 +249,10 @@ class FakeWatermarkRenderer implements WatermarkRenderer {
 
 /// 供预览层复用的文字测量实现（与出图共用同一套度量，保证所见即所得）。
 double textPainterMeasure(String text, double fontSize, bool bold) {
-  final painter = ui.TextPainter(
-    text: ui.TextSpan(
+  final painter = TextPainter(
+    text: TextSpan(
       text: text,
-      style: ui.TextStyle(
+      style: TextStyle(
         fontSize: fontSize,
         fontWeight: bold ? ui.FontWeight.w700 : ui.FontWeight.w500,
       ),

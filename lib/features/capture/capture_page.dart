@@ -247,7 +247,7 @@ class _Controls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final camera = controller.camera;
-    final maxZoom = camera?.value.maxZoomLevel ?? 1.0;
+    final maxZoom = camera == null ? 1.0 : controller.maxZoom;
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),

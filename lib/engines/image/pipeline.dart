@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import '../../core/extensions/watermark_field_provider.dart';
 import '../../core/layout/layout_engine.dart';
 import '../../core/models/photo_metadata.dart';
 import '../../core/models/pipeline_job.dart';
@@ -166,7 +165,7 @@ class PipelineRunner {
         layout: frame.read<WatermarkLayout>('layout'),
       );
     } catch (error) {
-      throw PipelineFailure(job, currentStage, error);
+      throw PipelineFailure(job, currentStage ?? '初始化', error);
     }
   }
 }

@@ -3,6 +3,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../app/services.dart';
 import '../../core/models/ledger_entry.dart';
+import '../../core/models/types.dart';
 import '../../engines/storage/ledger_store.dart';
 
 /// 台账：按天查看 + 导出台账 Excel（文件名、来源、时间、经纬度、地址、备注）。

@@ -191,10 +191,12 @@ class FaceBlurMiddleware implements ImageMiddleware {
   }
 
   Future<ui.Image> _pixelate(ui.Image source, LayoutRect rect) async {
-    final left = rect.left.clamp(0, source.width.toDouble());
-    final top = rect.top.clamp(0, source.height.toDouble());
-    final width = rect.width.clamp(1, source.width - left);
-    final height = rect.height.clamp(1, source.height - top);
+    final left = rect.left.clamp(0.0, source.width.toDouble()).toDouble();
+    final top = rect.top.clamp(0.0, source.height.toDouble()).toDouble();
+    final width =
+        rect.width.clamp(1.0, source.width - left).toDouble();
+    final height =
+        rect.height.clamp(1.0, source.height - top).toDouble();
     final src = ui.Rect.fromLTWH(left, top, width, height);
     const blocks = 12.0;
     final smallWidth = math.max(1, (width / blocks).round());

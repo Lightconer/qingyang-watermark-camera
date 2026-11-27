@@ -16,7 +16,7 @@ class NtpResult {
   });
 
   /// 服务器时间（已按往返时延的一半补偿）。
-  final Duration serverTime;
+  final DateTime serverTime;
   final Duration offset;
   final Duration roundTrip;
   final DateTime queriedAt;

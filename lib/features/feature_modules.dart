@@ -15,7 +15,7 @@ import 'verify/verify_page.dart';
 /// 每个模块可以携带：路由、水印字段、图像中间件、设置分区、启动初始化逻辑。
 
 /// 拍摄链路模块。
-class CaptureFeature implements FeatureModule {
+class CaptureFeature extends FeatureModule {
   @override
   String get id => 'capture';
 
@@ -47,7 +47,7 @@ class CaptureFeature implements FeatureModule {
 }
 
 /// 导入链路模块。
-class ImportFeature implements FeatureModule {
+class ImportFeature extends FeatureModule {
   @override
   String get id => 'import';
 
@@ -93,7 +93,7 @@ class _ImportSettings extends StatelessWidget {
 }
 
 /// 模板模块。
-class TemplateFeature implements FeatureModule {
+class TemplateFeature extends FeatureModule {
   @override
   String get id => 'template';
 
@@ -104,7 +104,7 @@ class TemplateFeature implements FeatureModule {
 }
 
 /// 相册模块。
-class GalleryFeature implements FeatureModule {
+class GalleryFeature extends FeatureModule {
   @override
   String get id => 'gallery';
 
@@ -120,7 +120,7 @@ class GalleryFeature implements FeatureModule {
 }
 
 /// 校验模块。
-class VerifyFeature implements FeatureModule {
+class VerifyFeature extends FeatureModule {
   @override
   String get id => 'verify';
 
@@ -131,7 +131,7 @@ class VerifyFeature implements FeatureModule {
 }
 
 /// 台账模块。
-class LedgerFeature implements FeatureModule {
+class LedgerFeature extends FeatureModule {
   @override
   String get id => 'ledger';
 
@@ -142,7 +142,7 @@ class LedgerFeature implements FeatureModule {
 }
 
 /// 设置模块。
-class SettingsFeature implements FeatureModule {
+class SettingsFeature extends FeatureModule {
   @override
   String get id => 'settings';
 

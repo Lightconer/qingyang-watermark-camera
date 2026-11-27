@@ -30,6 +30,9 @@ extension PhotoSourceX on PhotoSource {
 
   String get code => name;
 
+  /// 画面上使用的短标签，必须与 [Provenance.shortBadge] 口径一致。
+  String get shortBadge => this == PhotoSource.camera ? '现场' : '导入';
+
   bool get isImport => this != PhotoSource.camera;
 
   static PhotoSource fromCode(String? code) {
