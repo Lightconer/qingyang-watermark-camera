@@ -174,10 +174,8 @@ subprojects {
     )
 }
 
-subprojects {
-    project.evaluationDependsOn(":app")
-}
-
+// 必须在下面 evaluationDependsOn(":app") 之前注册：那一句会立即触发 :app 的评估，
+// 已评估过的工程再调 afterEvaluate 会直接抛错。
 subprojects {
     afterEvaluate { p ->
         def ext = p.extensions.findByName("android")
@@ -191,8 +189,20 @@ subprojects {
             } catch (Exception e) {
                 p.logger.warn("[qingyang] ${p.name}: 覆盖 compileSdk 失败（${e.message}）")
             }
+            // AGP 8+ 要求每个模块声明 namespace，个别老插件没写，这里用 group 兜底。
+            if (ext.hasProperty("namespace") && !ext.namespace) {
+                def guess = p.group == null ? "" : p.group.toString()
+                if (guess.contains(".") && guess != "unspecified") {
+                    ext.namespace = guess
+                    p.logger.lifecycle("[qingyang] ${p.name}: namespace 兜底为 ${guess}")
+                }
+            }
         }
     }
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
 }
 
 tasks.register("clean", Delete) {
