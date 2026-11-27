@@ -143,6 +143,64 @@ for f in android/app/build.gradle android/app/build.gradle.kts; do
   fi
 done
 
+# ---------------------------------------------------------------- 根构建脚本
+# `flutter create` 生成的根脚本是 Kotlin DSL。这里整体改写成 Groovy：
+#   1) 根脚本只做仓库、输出目录与子工程编排，不碰 AGP 的任何 DSL 类型，
+#      可以安全地用动态语言写；
+#   2) AGP 9 把 `Project.android(Action<BaseAppModuleExtension>)` 的 Kotlin DSL
+#      访问器标成了 DeprecationLevel.ERROR，Kotlin 版根脚本稍有不慎就编译不过；
+#   3) 需要给所有插件子工程统一抬高 compileSdk（见下），Groovy 的动态属性
+#      赋值比在 Kotlin DSL 里引用 AGP 扩展类更稳。
+#
+# 统一 compileSdk 的原因：部分插件（如 file_picker 8.x）自身仍声明 android-34，
+# 而 flutter_plugin_android_lifecycle 要求依赖方编译在 36 以上，
+# 否则会在 `:xxx:checkReleaseAarMetadata` 上直接失败。
+rm -f android/build.gradle.kts
+cat > android/build.gradle <<'ROOT_GRADLE_EOF'
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.layout.buildDirectory.value(
+    rootProject.layout.buildDirectory.dir("../../build").get()
+)
+
+subprojects {
+    project.layout.buildDirectory.value(
+        rootProject.layout.buildDirectory.get().dir(project.name)
+    )
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+subprojects {
+    afterEvaluate { p ->
+        def ext = p.extensions.findByName("android")
+        if (ext != null) {
+            try {
+                def current = ext.compileSdk
+                if (current == null || current < 36) {
+                    ext.compileSdk = 36
+                    p.logger.lifecycle("[qingyang] ${p.name}: compileSdk ${current} -> 36")
+                }
+            } catch (Exception e) {
+                p.logger.warn("[qingyang] ${p.name}: 覆盖 compileSdk 失败（${e.message}）")
+            }
+        }
+    }
+}
+
+tasks.register("clean", Delete) {
+    delete(rootProject.layout.buildDirectory)
+}
+ROOT_GRADLE_EOF
+echo "[bootstrap] android/build.gradle 已写入（Groovy，统一插件 compileSdk=36）"
+
 # 打印实际生效的 DSL / AGP 版本，便于构建失败时定位（不参与构建逻辑）
 for f in android/app/build.gradle android/app/build.gradle.kts; do
   [ -f "$f" ] && echo "[bootstrap] 使用 $f"
