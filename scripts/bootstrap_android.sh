@@ -201,6 +201,18 @@ subprojects {
     }
 }
 
+// 关闭 release 的 lintVital 任务：
+//   1) 构建门禁在 Dart 侧（flutter analyze + flutter test），Android lint 不参与；
+//   2) camera_android_camerax 在 CI 的 JDK/AGP 组合下会让 lint 的 CommentDetector
+//      崩溃（java.util.List.removeLast 不存在），属 lint 自身 bug，不该阻断出包。
+subprojects {
+    tasks.configureEach { t ->
+        if (t.name.startsWith("lintVital")) {
+            t.enabled = false
+        }
+    }
+}
+
 subprojects {
     project.evaluationDependsOn(":app")
 }
