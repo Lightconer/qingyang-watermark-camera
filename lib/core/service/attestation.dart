@@ -120,6 +120,8 @@ class AttestationService {
         label: 'EXIF / XMP 交叉比对',
         passed: xmpSha256 == stamp!.fileSha256,
         detail: xmpSha256 == stamp.fileSha256 ? '一致' : '两处记录不一致',
+        // 两处冗余记录互相矛盾，说明至少有一处被改写过，按篡改处理。
+        critical: true,
       ));
     }
 

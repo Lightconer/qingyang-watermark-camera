@@ -72,7 +72,7 @@ void main() {
     expect(report.verdict, AttestVerdict.unknown);
   });
 
-  test('EXIF 与 XMP 记录不一致 → 记录不一致', () {
+  test('EXIF 与 XMP 记录不一致 → 疑似被修改', () {
     final report = service.verify(
       actualSha256: 'a' * 64,
       metadata: metadataWith(stamp()),

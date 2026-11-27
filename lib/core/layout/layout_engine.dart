@@ -165,6 +165,11 @@ class LayoutEngine {
     final minBandHeight = shortSide * _minBandRatio;
     final padding = shortSide * style.paddingRatio;
 
+    // 是否需要溯源二维码只认 qrData：管线侧已按模板开关决定传不传
+    // （middlewares 的 wantsQr），布局层不再重复判断 style.showQr，
+    // 避免"模板开了二维码但样式没开"时静默丢掉二维码。
+    final wantsQr = qrData != null && qrData.isNotEmpty;
+
     var fontSize = _clamp(
       shortSide * style.fontSizeRatio,
       style.minFontSize,
@@ -186,7 +191,7 @@ class LayoutEngine {
 
     var denseFields = buildFields(compact);
     var availableWidth = size.width - padding * 2;
-    if (style.showQr) {
+    if (wantsQr) {
       availableWidth -= shortSide * style.qrSizeRatio + padding;
     }
     availableWidth = math.max(availableWidth, shortSide * 0.35);
@@ -261,7 +266,7 @@ class LayoutEngine {
     }
 
     LayoutRect? qrRect;
-    if (style.showQr && qrData != null && qrData.isNotEmpty) {
+    if (wantsQr) {
       final qrSize = shortSide * style.qrSizeRatio;
       qrRect = LayoutRect(
         band.right - padding - qrSize,
