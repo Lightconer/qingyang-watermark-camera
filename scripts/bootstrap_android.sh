@@ -159,6 +159,8 @@ fi
 KOTLIN_DIR="android/app/src/main/kotlin/com/qingyang/watermark"
 rm -rf android/app/src/main/kotlin/com/qingyang/qingyang_watermark 2>/dev/null || true
 mkdir -p "$KOTLIN_DIR"
+# 注意：Kotlin 支持嵌套块注释，注释正文里不能再出现 /*，
+# 之前写成 "ACTION_SEND image/*" 会让整段 KDoc 变成未闭合注释。
 cat > "$KOTLIN_DIR/MainActivity.kt" <<'KOTLIN_EOF'
 package com.qingyang.watermark
 
@@ -174,7 +176,7 @@ import java.io.FileOutputStream
 /**
  * 宿主 Activity：只做三件事
  * 1. 暴露设备型号（水印"设备型号"字段）；
- * 2. 接收 ACTION_SEND image/*，把分享进来的图片复制到缓存目录，供 Dart 侧导入；
+ * 2. 接收 ACTION_SEND（image 类型）分享，把图片复制到缓存目录，供 Dart 侧导入；
  * 3. 保证单实例（singleTop），避免分享时重复启动。
  */
 class MainActivity : FlutterActivity() {
