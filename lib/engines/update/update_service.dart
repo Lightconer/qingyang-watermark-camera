@@ -99,7 +99,6 @@ class UpdateService {
       onProgress: onProgress,
     );
   }
-}
 
   Future<void> openReleasePage(UpdateRelease release) async {
     if (release.pageUrl.isEmpty) return;
