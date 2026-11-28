@@ -121,15 +121,21 @@ git push origin v1.0.1
 | `KEY_ALIAS` | key 别名 |
 | `KEY_PASSWORD` | key 口令 |
 
-最省事的是跑现成脚本：它会自动找 `keytool`、生成随机强口令，把 4 个 Secret 的值和
-可直接复制的 `gh secret set` 命令全部打印出来（加 `--apply` 可在已登录 `gh` 时直接写入仓库）：
+最省事的是跑现成脚本：自动找 `keytool`（找不到就退回 `openssl`）、生成随机强口令，
+把 4 条**填好值**的 `gh secret set` 命令打印出来并存成文件：
 
 ```bash
-bash scripts/setup_signing.sh
+bash scripts/setup_signing.sh             # 生成证书 + 打印命令（默认，不写 GitHub）
+bash scripts/setup_signing.sh --print     # 忘了命令时重打，复用已有证书，不会换证书
+bash scripts/setup_signing.sh --apply     # 生成后直接写入仓库 Secrets（需已登录 gh）
 ```
 
-生成物落在 `dist/`（已被 `.gitignore` 忽略）：`release.jks`、`keystore.base64`、`signing-secrets.txt`。
-**这三个文件要另外离线备份**，私钥丢了就再也无法给老用户升级。
+生成物落在 `dist/`（已被 `.gitignore` 忽略）：`release.jks`、`keystore.base64`、
+`signing-secrets.txt`（4 个明文值）、`secret-commands.txt`（4 条填好值的命令，打开即可整段复制）。
+**这些文件要另外离线备份**，私钥丢了就再也无法给老用户升级。
+
+> 没有 JDK 也能用：脚本会用系统自带的 openssl 生成 PKCS12 证书（alias 固定 `qingyang`，
+> 有效期到 2054 年），apksigner 按内容识别 keystore 类型，两种来源都能读。
 
 也可以手工生成 keystore（只做一次，本地保存好）：
 
