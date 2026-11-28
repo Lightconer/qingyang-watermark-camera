@@ -196,14 +196,26 @@ class ImportController extends ChangeNotifier {
         },
       );
 
-      // 写台账（仅成功的条目）。
+      // 写台账 + 存入系统相册（仅成功的条目）。
       final ledger = LedgerStore(services.storage);
+      var gallerySaved = 0;
       for (final result in outcome.results) {
         final item = jobItems[result.job.id];
         if (item == null || result.skipped) continue;
         await ledger.append(_ledgerEntry(result, item));
+
+        // 相册写入失败不回滚成品：应用目录里的成品与台账仍然有效，
+        // 只是系统图库看不到这一张，单张状态里写明原因即可。
+        final exported = await services.gallery.save(
+          path: result.outputPath,
+          fileName: p.basename(result.outputPath),
+        );
+        if (exported.isSaved) gallerySaved++;
+        item.message = '已完成 · ${exported.describe()}';
+        notifyListeners();
       }
-      _current = '批量完成：成功 ${outcome.results.length}，失败 ${outcome.failures.length}';
+      _current = '批量完成：成功 ${outcome.results.length}，失败 ${outcome.failures.length}'
+          '，入相册 $gallerySaved';
     } finally {
       _processing = false;
       notifyListeners();

@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/extensions/watermark_field_provider.dart';
 import '../../core/models/template.dart';
+import '../../core/policy/album_policy.dart';
 
 /// 设置存储：所有开关、密钥、默认模板、输出路径、台账配置集中在这里。
 ///
@@ -46,6 +47,13 @@ class SettingsStore extends ChangeNotifier {
   bool get saveOriginal => _prefs.getBool('output.saveOriginal') ?? false;
   String get captureModeId => _prefs.getString('output.profile') ?? 'forensics';
 
+  /// 成品是否复制进系统相册的独立相册（默认开：外勤要能直接在系统图库/微信里找到）。
+  bool get exportToGallery => _prefs.getBool('output.gallery') ?? true;
+
+  /// 系统相册里的相册名；实际写入前会按 [AlbumPolicy] 归一化。
+  String get galleryAlbum =>
+      _prefs.getString('output.galleryAlbum') ?? AlbumPolicy.defaultAlbum;
+
   Future<void> setJpegQuality(int value) async {
     await _prefs.setInt('output.quality', value.clamp(60, 100));
     notifyListeners();
@@ -57,6 +65,13 @@ class SettingsStore extends ChangeNotifier {
   }
 
   Future<void> setSaveOriginal(bool value) => _setBool('output.saveOriginal', value);
+
+  Future<void> setExportToGallery(bool value) => _setBool('output.gallery', value);
+
+  Future<void> setGalleryAlbum(String value) async {
+    await _prefs.setString('output.galleryAlbum', AlbumPolicy.normalize(value));
+    notifyListeners();
+  }
 
   Future<void> setCaptureModeId(String value) async {
     await _prefs.setString('output.profile', value);

@@ -5,6 +5,7 @@ import '../engines/geocoding/geocoding_engine.dart';
 import '../engines/hash/hash_engine.dart';
 import '../engines/image/image_codec.dart';
 import '../engines/location/location_engine.dart';
+import '../engines/media/gallery_export_engine.dart';
 import '../engines/media/media_gateway.dart';
 import '../engines/metadata/metadata_engine.dart';
 import '../engines/storage/settings_store.dart';
@@ -66,6 +67,11 @@ Future<AppServices> bootstrapServices() async {
     geocoding: geocoding,
     weather: weather,
     media: PlatformMediaGateway(),
+    gallery: GalleryExportService(
+      engine: const MediaStoreGalleryExportEngine(),
+      isEnabled: () => settings.exportToGallery,
+      albumName: () => settings.galleryAlbum,
+    ),
     profiles: profiles,
     templates: templates,
     registry: registry,

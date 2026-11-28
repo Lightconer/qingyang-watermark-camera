@@ -15,6 +15,7 @@ import '../../core/models/template.dart';
 import '../../core/models/types.dart';
 import '../../engines/image/pipeline.dart';
 import '../../engines/location/location_engine.dart';
+import '../../engines/media/gallery_export_engine.dart';
 import '../../engines/storage/ledger_store.dart';
 import '../../engines/storage/storage_engine.dart';
 
@@ -75,6 +76,10 @@ class CaptureController extends ChangeNotifier {
   bool get recording => _recording;
   String? get error => _error;
   String get status => _status;
+
+  /// 最近一次相册写入结果：拍摄页据此提示"已存入相册 / 缺权限"，不做硬失败。
+  GalleryExportResult? get lastGallery => _lastGallery;
+  GalleryExportResult? _lastGallery;
   LocationFix? get fix => _fix;
   DateTime? get fixAt => _fixAt;
   String? get address => _address;
@@ -343,17 +348,26 @@ class CaptureController extends ChangeNotifier {
         await File(xfile.path).copy(originalTarget);
       }
 
+      GalleryExportResult? exported;
       if (!result.skipped) {
         await LedgerStore(services.storage).append(_ledgerEntry(
           job: job,
           result: result,
           originalPath: xfile.path,
         ));
+
+        _status = '正在存入相册…';
+        notifyListeners();
+        exported = await services.gallery.save(
+          path: result.outputPath,
+          fileName: p.basename(result.outputPath),
+        );
+        _lastGallery = exported;
       }
 
       _status = result.skipped
           ? '已跳过：${result.skipReason ?? '检测到已有水印'}'
-          : '已保存 ${p.basename(result.outputPath)}';
+          : '${p.basename(result.outputPath)} · ${exported!.describe()}';
       return result.skipped ? null : result.outputPath;
     } catch (error) {
       _status = '拍摄失败：$error';

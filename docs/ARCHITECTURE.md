@@ -38,7 +38,7 @@ lib/
 │   ├── weather/                  天气（Open-Meteo / 关闭）
 │   ├── hash/                     SHA256（文件 / 去元数据像素流）
 │   ├── storage/                  存储目录、设置、模板、台账
-│   └── media/                    相册 / SAF / ACTION_SEND 入口
+│   └── media/                    相册写入（MediaStore）/ SAF / ACTION_SEND 入口
 └── core/                         纯 Dart 领域层：无 Flutter 依赖，可单测
     ├── models/                   PhotoMetadata / CaptureContext / Provenance / Template / Profile / Job / Ledger
     ├── policy/                   时间口径、坐标口径、时间格式
@@ -78,6 +78,7 @@ app ──▶ features ──▶ engines ──▶ core
 | 哈希 | `HashEngine` | `CryptoHashEngine` | `FakeHashEngine` |
 | 存储 | `StorageEngine` | `FileStorageEngine` | `FakeStorageEngine` |
 | 媒体入口 | `MediaGateway` | `PlatformMediaGateway` | `FakeMediaGateway` |
+| 相册输出 | `GalleryExportEngine` | `MediaStoreGalleryExportEngine` | `FakeGalleryExportEngine` |
 
 ---
 
@@ -263,7 +264,27 @@ abstract class FeatureModule {
 
 ---
 
-## 7. 构建环境注意事项（`scripts/bootstrap_android.sh`）
+## 7. 成品去向：应用目录 + 系统相册双写
+
+成品先落在应用私有外部目录（`QingyangWatermark/日期/camera|import`），这是**唯一事实源**：
+相册页扫它、校验读它、台账记它的路径。落盘成功后再复制一份进系统相册的独立相册
+（默认 `Pictures/青阳水印相机/`），让系统图库、微信、文件管理器可以直接取用。
+
+* 引擎：`GalleryExportEngine` / `MediaStoreGalleryExportEngine`
+  （MethodChannel `com.qingyang.watermark/gallery` → `MainActivity.saveToGallery`）。
+* Android 10+ 走 `MediaStore` + `RELATIVE_PATH` + `IS_PENDING`（先占位后落盘，
+  避免相册里出现半张图）；Android 9 及以下写公共 `Pictures` 目录后由
+  `MediaScannerConnection` 登记，否则重启后相册里看不到。
+* 相册名经 `AlbumPolicy.normalize` 归一化：`/ \ : * ? " < > |` 与控制字符替换为
+  `_`，去首尾点号、压连续空白、截到 40 字、空名回退默认——相册名会拼进真实路径，
+  不过滤就会写进别的目录或直接失败。
+* 相册写入失败**不回滚**成品与台账：状态里写明原因（缺权限 / 磁盘拒绝），
+  相册详情页提供"存入系统相册"手动重试。
+* 关掉「同时存入系统相册」后不产生任何副本，等价于完全离线 + 仅私有目录。
+
+---
+
+## 8. 构建环境注意事项（`scripts/bootstrap_android.sh`）
 
 仓库不提交 `android/`，平台目录在构建前由脚本现生成。踩过的坑记在这里，改动脚本前先读：
 

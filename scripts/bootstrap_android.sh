@@ -244,9 +244,15 @@ mkdir -p "$KOTLIN_DIR"
 cat > "$KOTLIN_DIR/MainActivity.kt" <<'KOTLIN_EOF'
 package com.qingyang.watermark
 
+import android.Manifest
+import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -254,10 +260,11 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * 宿主 Activity：只做三件事
+ * 宿主 Activity：只做四件事
  * 1. 暴露设备型号（水印"设备型号"字段）；
  * 2. 接收 ACTION_SEND（image 类型）分享，把图片复制到缓存目录，供 Dart 侧导入；
- * 3. 保证单实例（singleTop），避免分享时重复启动。
+ * 3. 把成品写入系统相册的独立相册（MediaStore）；
+ * 4. 保证单实例（singleTop），避免分享时重复启动。
  */
 class MainActivity : FlutterActivity() {
     private val sharedPaths = mutableListOf<String>()
@@ -279,6 +286,32 @@ class MainActivity : FlutterActivity() {
                     "takeSharedImages" -> {
                         result.success(ArrayList(sharedPaths))
                         sharedPaths.clear()
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.qingyang.watermark/gallery")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "saveImage" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrBlank()) {
+                            result.error("bad_args", "缺少图片路径", null)
+                        } else {
+                            val album = call.argument<String>("album") ?: "青阳水印相机"
+                            val name = call.argument<String>("name") ?: File(path).name
+                            try {
+                                val uri = saveToGallery(path, album, name)
+                                if (uri == null) {
+                                    result.error("permission_required", "缺少写入相册的权限", null)
+                                } else {
+                                    result.success(uri)
+                                }
+                            } catch (error: Exception) {
+                                result.error("io_error", error.message ?: "写入相册失败", null)
+                            }
+                        }
                     }
                     else -> result.notImplemented()
                 }
@@ -310,6 +343,81 @@ class MainActivity : FlutterActivity() {
             intent.getParcelableExtra(Intent.EXTRA_STREAM)
         }
 
+    /**
+     * 把图片放进系统相册的独立相册（Pictures/相册名/）。
+     * 返回 content uri（Android 10+）或绝对路径（9 及以下）；缺权限返回 null。
+     */
+    private fun saveToGallery(sourcePath: String, album: String, name: String): String? {
+        val source = File(sourcePath)
+        if (!source.exists()) throw IllegalStateException("原文件不存在")
+
+        val safeAlbum = album
+            .replace("/", "_")
+            .replace("\\", "_")
+            .trim()
+            .ifEmpty { "青阳水印相机" }
+        val mime = if (name.endsWith(".png", ignoreCase = true)) "image/png" else "image/jpeg"
+
+        // Android 9 及以下：写公共 Pictures 目录后交给 MediaScanner 登记，
+        // 否则重启后相册里会看不到这张图。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val granted = checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                PackageManager.PERMISSION_GRANTED
+            if (!granted) return null
+            val pictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            val dir = File(pictures, safeAlbum)
+            if (!dir.exists() && !dir.mkdirs()) throw IllegalStateException("无法创建相册目录")
+            val target = uniqueFile(dir, name)
+            source.inputStream().use { input ->
+                FileOutputStream(target).use { output -> input.copyTo(output) }
+            }
+            MediaScannerConnection.scanFile(this, arrayOf(target.absolutePath), arrayOf(mime), null)
+            return target.absolutePath
+        }
+
+        // Android 10+：走 MediaStore，先 IS_PENDING=1 再落盘，写完立即置 0，
+        // 避免相册里出现写了一半的图片。
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(MediaStore.Images.Media.MIME_TYPE, mime)
+            put(
+                MediaStore.Images.Media.RELATIVE_PATH,
+                Environment.DIRECTORY_PICTURES + "/" + safeAlbum,
+            )
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val uri = contentResolver.insert(collection, values)
+            ?: throw IllegalStateException("系统拒绝写入相册")
+        try {
+            val stream = contentResolver.openOutputStream(uri)
+                ?: throw IllegalStateException("无法打开相册写入流")
+            stream.use { output ->
+                source.inputStream().use { input -> input.copyTo(output) }
+            }
+        } catch (error: Exception) {
+            // 写失败要清掉占位记录，否则相册里会留下一条空条目
+            contentResolver.delete(uri, null, null)
+            throw error
+        }
+        val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
+        contentResolver.update(uri, done, null, null)
+        return uri.toString()
+    }
+
+    /** 同名时追加序号，绝不覆盖相册里已有的图。 */
+    private fun uniqueFile(dir: File, name: String): File {
+        val base = name.substringBeforeLast('.', name)
+        val ext = if (name.contains('.')) name.substringAfterLast('.') else "jpg"
+        var candidate = File(dir, name)
+        var index = 1
+        while (candidate.exists()) {
+            candidate = File(dir, base + "_" + index + "." + ext)
+            index++
+        }
+        return candidate
+    }
+
     private fun copyToCache(uri: Uri) {
         try {
             val target = File(cacheDir, "shared_${System.currentTimeMillis()}.jpg")
@@ -323,7 +431,7 @@ class MainActivity : FlutterActivity() {
     }
 }
 KOTLIN_EOF
-echo "[bootstrap] MainActivity.kt 已写入（设备型号 / ACTION_SEND）"
+echo "[bootstrap] MainActivity.kt 已写入（设备型号 / ACTION_SEND / 相册写入）"
 
 # ---------------------------------------------------------------- 签名
 if [ -n "${KEYSTORE_BASE64:-}" ]; then

@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../app/router.dart';
 import '../../app/services.dart';
 import '../../core/models/template.dart';
+import '../../core/policy/album_policy.dart';
 import '../../core/models/types.dart';
 
 /// 设置页：字段、模板、API Key、输出路径、台账、功能模块集中在这里。
@@ -164,6 +165,30 @@ class SettingsPage extends StatelessWidget {
                   title: const Text('同时保存原图'),
                   subtitle: const Text('原图放在 original/ 目录，成品另存为原名_wm'),
                 ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  value: services.settings.exportToGallery,
+                  onChanged: services.settings.setExportToGallery,
+                  title: const Text('同时存入系统相册'),
+                  subtitle: const Text('在系统图库里单独成一个相册，微信/文件管理器可直接取用'),
+                ),
+                if (services.settings.exportToGallery) ...[
+                  const Divider(height: 1),
+                  ListTile(
+                    title: const Text('相册名称'),
+                    subtitle: Text(
+                      'Pictures / ${services.settings.galleryAlbum}',
+                    ),
+                    trailing: const Icon(Icons.edit_outlined, size: 18),
+                    onTap: () => _editText(
+                      context,
+                      title: '相册名称',
+                      initial: services.settings.galleryAlbum,
+                      hint: '留空则用默认名「${AlbumPolicy.defaultAlbum}」',
+                      onSubmit: services.settings.setGalleryAlbum,
+                    ),
+                  ),
+                ],
                 const Divider(height: 1),
                 ListTile(
                   title: const Text('成品目录'),
@@ -353,6 +378,7 @@ class SettingsPage extends StatelessWidget {
     required String title,
     required String initial,
     required Future<void> Function(String value) onSubmit,
+    String hint = '留空表示不显示',
   }) async {
     final controller = TextEditingController(text: initial);
     final value = await showDialog<String>(
@@ -362,7 +388,7 @@ class SettingsPage extends StatelessWidget {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(hintText: '留空表示不显示'),
+          decoration: InputDecoration(hintText: hint),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),

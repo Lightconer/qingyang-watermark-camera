@@ -10,6 +10,7 @@ import '../../core/models/template.dart';
 import '../../core/models/types.dart';
 import '../../core/policy/policies.dart';
 import '../../core/service/attestation.dart';
+import '../../engines/media/gallery_export_engine.dart';
 
 /// 相册索引项。
 class GalleryPhoto {
@@ -290,7 +291,28 @@ class PhotoDetailPage extends StatefulWidget {
 
 class _PhotoDetailPageState extends State<PhotoDetailPage> {
   AttestationReport? _report;
+  GalleryExportResult? _exported;
   bool _verifying = false;
+  bool _exporting = false;
+
+  /// 手动把这张成品放进系统相册：用于补齐历史照片，或在授予存储权限后重试。
+  Future<void> _saveToGallery() async {
+    final services = ServicesScope.of(context);
+    setState(() => _exporting = true);
+    try {
+      final result = await services.gallery.save(
+        path: widget.photo.path,
+        fileName: widget.photo.fileName,
+      );
+      if (!mounted) return;
+      setState(() => _exported = result);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.describe())),
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
 
   Future<void> _verify() async {
     final services = ServicesScope.of(context);
@@ -321,6 +343,17 @@ class _PhotoDetailPageState extends State<PhotoDetailPage> {
         title: Text(photo.fileName, overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
+            tooltip: '存入系统相册',
+            onPressed: _exporting ? null : _saveToGallery,
+            icon: _exporting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.photo_library_outlined),
+          ),
+          IconButton(
             tooltip: '校验',
             onPressed: _verifying ? null : _verify,
             icon: const Icon(Icons.verified_outlined),
@@ -348,6 +381,11 @@ class _PhotoDetailPageState extends State<PhotoDetailPage> {
             _row('单位', stamp?.organization ?? '未填写'),
             _row('项目', stamp?.project ?? '未填写'),
           ]),
+          if (_exported != null)
+            _Section(title: '系统相册', children: [
+              _row('结果', _exported!.describe()),
+              _row('定位符', _exported!.uri ?? '-'),
+            ]),
           _Section(title: '哈希与溯源', children: [
             _row('内容指纹', stamp?.fingerprint ?? '-'),
             _row('成品哈希', stamp?.fileSha256 ?? '-'),
