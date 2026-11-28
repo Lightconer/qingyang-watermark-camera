@@ -1,7 +1,7 @@
 name: qingyang_watermark
 description: 青阳水印相机 — 拍摄与导入照片自动叠加可信经纬水印，本地优先、无广告、不强制云端。
 publish_to: "none"
-version: 1.1.0+1
+version: 1.2.0+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
