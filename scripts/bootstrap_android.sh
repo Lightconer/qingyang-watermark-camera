@@ -10,7 +10,8 @@
 # Kotlin DSL 与 Groovy DSL 语法不同，改错一个字整个构建就编译不过。
 #
 # 签名也不在 Gradle 里做：release 产物统一交给 scripts/sign_apk.sh
-# 用 zipalign + apksigner 重签，未配置 keystore 时该脚本自动跳过。
+# 用 zipalign + apksigner 无条件重签（补齐 v1/v2/v3）；未配置 keystore 时
+# 该脚本改用 Flutter 的调试证书重签，不会跳过——跳过正是「解析包失败」的根因。
 #
 # 用法：bash scripts/bootstrap_android.sh
 # 可选环境变量：

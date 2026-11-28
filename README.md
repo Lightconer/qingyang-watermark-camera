@@ -17,13 +17,13 @@ APK 由 GitHub Releases 直接提供（每次发版自动构建）。当前最�
 ### 该下哪个包
 
 从 v1.4.0 起按 CPU 架构拆包——通用包会把三套 Flutter 引擎全塞进来，
-54 MB 里有近 30 MB 是这台手机永远用不到的另一套 native 库。拆开后单包只有 21 MB 左右，
+54 MB 里有近 30 MB 是这台手机永远用不到的另一套 native 库。拆开后单包只有 19 MB 左右，
 下载中断（也就是「解析包时出现问题」最常见的成因）的概率随之大幅下降。
 
-| 文件 | 适用设备 | 体积 |
+| 文件 | 适用设备 | 体积（v1.4.0 实测） |
 | --- | --- | --- |
-| `qingyang-watermark-vX.Y.Z-arm64-v8a.apk` | **绝大多数手机**（2016 年以后的机型，首选） | 约 21 MB |
-| `qingyang-watermark-vX.Y.Z-armeabi-v7a.apk` | 32 位老设备 / 低端机（arm64 包装不上时再用） | 约 19 MB |
+| `qingyang-watermark-vX.Y.Z-arm64-v8a.apk` | **绝大多数手机**（2016 年以后的机型，首选；荣耀 Power 2 用这个） | 19.26 MB |
+| `qingyang-watermark-vX.Y.Z-armeabi-v7a.apk` | 32 位老设备 / 低端机（arm64 包装不上时再用） | 17.24 MB |
 
 拿不准就下 `arm64-v8a`。**装错了不会损坏任何数据**，系统只会提示「应用未安装」或
 「解析包时出现问题」，换另一个包即可。
@@ -34,10 +34,12 @@ APK 由 GitHub Releases 直接提供（每次发版自动构建）。当前最�
 2. 手机允许「安装未知来源应用」（给浏览器或文件管理器授权，不是给本应用）；
 3. 安装后首次启动依次授予：**精确定位** → **相机** → **存储/相册**
    （Android 13+ 走系统 Photo Picker，不需要媒体权限）；
-4. 校验安装包（可选）：
+4. 校验安装包（可选，推荐——能直接排除「下载不完整」）：
 
 ```bash
-sha256sum -c SHA256SUMS.txt
+# 清单里同时列了两只架构包，只挑自己下载的那只校验即可
+grep 'arm64-v8a' SHA256SUMS.txt | sha256sum -c -
+# 若下的是 32 位包：grep 'armeabi-v7a' SHA256SUMS.txt | sha256sum -c -
 ```
 
 ### 报「解析包时出现问题」怎么办
@@ -131,17 +133,19 @@ keytool -genkeypair -v \
 base64 -w0 release.jks   # 复制输出到 KEYSTORE_BASE64
 ```
 
-**未配置时**：`bootstrap_android.sh` 会清理 `key.properties` 并打印
-`警告：未配置 KEYSTORE_BASE64，release 将回退调试签名`；`sign_apk.sh` 检测不到证书时
-自动跳过重签并直接复制产物（构建不中断）。
+**未配置时**：`bootstrap_android.sh` 会清理 `key.properties`；`sign_apk.sh` **不会跳过重签**，
+而是改用 AGP 刚用过的调试证书（`~/.android/debug.keystore`）重签，把 v1/v2/v3 补齐。
+这正是修复「解析包时出现问题」的关键：`minSdk 24` 时 AGP 默认**不生成 v1**，
+而部分国产 ROM 的安装器发现包里没有 `META-INF/*.RSA` 就判「包损坏」——
+v1.3.0 及以前所有发布包都踩了这个坑（详见 `docs/ARCHITECTURE.md` 第 10.2 节）。
 
 ⚠️ **务必配置这四个 Secret**：未配置时 CI 用的是 Flutter 在临时容器里现生成的调试证书，
 **每次构建都不一样**。后果是用户装过一版就再也覆盖不了下一版——系统会报
 「应用未安装」或「与已安装应用签名不一致」，而且这和「解析包时出现问题」很容易被混淆。
 配置之后每次发布的证书指纹相同，升级才是连续的。
 
-签名统一在构建末尾做（`zipalign -P 16 -p -f 4` + `apksigner sign`，
-zipalign 与 apksigner 逐项加固的原因见 `docs/ARCHITECTURE.md` 第 10.2 节），
+签名统一在构建末尾做（`zipalign` 先试 16 KB 页对齐、不支持则回退 4 KB，
+再 `apksigner sign`；逐项加固的原因见 `docs/ARCHITECTURE.md` 第 10.2 节），
 不在 Gradle 里配置 `signingConfigs`，这样无论平台目录是 Kotlin DSL 还是 Groovy DSL
 生成，签名链路都只有一条、可复现。
 

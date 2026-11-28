@@ -318,12 +318,13 @@ abstract class FeatureModule {
 | `Cannot run Project.afterEvaluate(Closure) when the project is already evaluated` | `evaluationDependsOn(":app")` 会立即评估工程，之后再对同一工程注册 `afterEvaluate` 会抛错 | compileSdk 覆盖块必须排在 `evaluationDependsOn(":app")` **之前** |
 | `:camera_android_camerax:lintVitalAnalyzeRelease` 崩溃（`java.util.List.removeLast`） | lint 的 `CommentDetector` 在 CI 的 JDK/AGP 组合下的自身 bug | 关闭所有 `lintVital*` 任务；构建门禁在 Dart 侧（`flutter analyze` + `flutter test`） |
 | `:app:compileReleaseKotlin` → `Unclosed comment` | Kotlin 支持**嵌套**块注释，`MainActivity.kt` 的 KDoc 里写了 `image/*`，等于又开了一层 `/*` | Kotlin 注释正文里不要出现 `/*`，改写成「ACTION_SEND（image 类型）」 |
-| 用户报「解析包时出现问题」，而我们这边构建全绿 | 三个成因：包下载被截断（54 MB universal 包在国内网络极易断）、只带 v3 签名缺 v1、native 库只按 4 KB 对齐而新机是 16 KB 页 | 见第 10 节：分 ABI 拆包瘦身 + 签名 v1/v2/v3 全开 + `zipalign -P 16` + 发布前结构体检 |
+| 用户报「解析包时出现问题」，而我们这边构建全绿 | 三个成因：包下载被截断（54 MB universal 包在国内网络极易断）、**只有 v2/v3 缺 v1**（minSdk 24 时 AGP 默认不生成 v1，且旧脚本只在配置证书时才重签）、native 库对齐粒度 | 见第 10 节：分 ABI 拆包瘦身 + 无条件重签补齐 v1 + 发布前结构体检 |
 
 另外两条约定：
 
 * **签名只有一条链路**：Gradle 侧一律用默认调试签名，产物在构建末尾由 `scripts/sign_apk.sh`
-  重签；未配置 `KEYSTORE_BASE64` 时脚本跳过重签并直接复制产物（会告警，但构建不中断）。
+  **无条件重签**；未配置 `KEYSTORE_BASE64` 时改用 AGP 刚用过的调试证书重签（补齐 v1，
+  但证书每次构建都不同，跨版本覆盖安装会失败——必须配置四个签名 Secret）。
 * **版本号来源唯一**：`release.yml` 用标签版本号作 `--build-name`、流水线序号作
   `--build-number`，产物名 `qingyang-watermark-vX.Y.Z-<abi>.apk` 与 `SHA256SUMS.txt` 一并发布。
 
@@ -334,24 +335,36 @@ abstract class FeatureModule {
 「解析包时出现问题」在国产 ROM 上并不是一个根因，而是一组根因共用的提示语。
 这一节把四个成因逐个消掉。
 
-### 10.1 分 ABI 拆包：54 MB → 21 MB
+### 10.1 分 ABI 拆包：54 MB → 19 MB
 
 `flutter build apk` 默认产出 universal 包，把 `arm64-v8a` / `armeabi-v7a` / `x86_64`
 三套引擎全塞进去。一部 arm64 手机实际只会用到其中一套，另外两套（约 30 MB）纯属陪跑。
 但包越大，国内网络下载中断的概率越高，而**下载不完整正是这个报错最常见的成因**。
 
-v1.4.0 起 `scripts/build_release.sh` 用 `--split-per-abi` 出两个包：
+v1.4.0 起 `scripts/build_release.sh` 用 `--split-per-abi` 出两个包（下表为
+v1.4.0 线上实测体积，非估算）：
 
 | 产物 | 覆盖 | 体积 |
 | --- | --- | --- |
-| `...-arm64-v8a.apk` | 2016 年后的绝大多数手机 | ≈21 MB |
-| `...-armeabi-v7a.apk` | 32 位老设备 / 低端机 | ≈19 MB |
+| `...-arm64-v8a.apk` | 2016 年后的绝大多数手机 | 19.26 MB |
+| `...-armeabi-v7a.apk` | 32 位老设备 / 低端机 | 17.24 MB |
 
 `x86_64` 直接丢弃（只有模拟器会用）。代价是发布页有两只包，必须让用户选对——
 而"让用户选"本身就是失败源，所以应用内更新会自动按 `Build.SUPPORTED_ABIS` 选包
-（`core/policy/abi_policy.dart`，见 11.3）。
+（`core/policy/abi_policy.dart`，规则见本节）。
 
 ### 10.2 签名与对齐：把三种"结构性坏包"挡在发布前
+
+**先记根因，因为它不是猜出来的**：v1.0.0～v1.3.0 的所有发布产物都是**纯 v2/v3、缺 v1**。
+原因是 `minSdk 24` 时 AGP 认为 v1 只服务 Android 7 以下，默认**不生成 v1**；而旧版
+`sign_apk.sh` 只在配置了 `KEYSTORE_BASE64` 时才重签补 v1——这个仓库一直没配 Secret，
+于是脚本每次都走"跳过重签"分支，把缺 v1 的包原样发了出去。荣耀等国产 ROM 的安装器
+发现包里没有 `META-INF/*.RSA` 就判「包损坏」，这正是用户报的那句提示。
+CI 第一次跑新增的结构体检时直接红在「缺少 v1 签名」，反证了这条链路。
+
+所以修复的第一原则是：**重签不能是可选分支**。现在无论有没有发布证书都重签一遍：
+有证书用发布证书，没有就用 AGP 刚用过的调试证书（`~/.android/debug.keystore`，
+`androiddebugkey` / `android`）。后者能装上，但证书每次构建都不同，见下方告警。
 
 `scripts/sign_apk.sh` 现在的签名参数：
 
@@ -361,10 +374,18 @@ v1.4.0 起 `scripts/build_release.sh` 用 `--split-per-abi` 出两个包：
 * 不开 v4：v4 需要同目录的 `.idsig` 文件，侧载场景反而容易缺件。
 * `--min-sdk-version 24 --max-sdk-version 36` 显式传入：让 apksigner 自己读清单，
   万一读到错的 minSdk 会选错 v1 摘要算法。
-* `zipalign -P 16 -p -f 4`：16 KB 页对齐（build-tools 35+ 才有 `-P`，脚本会探测后回退）。
+* 对齐：`zipalign -P 16 -p -f 4` 先**真跑一次**，失败再退 `-p -f 4`。不去解析
+  `zipalign -h` 的用法文本判断支持性——不同 build-tools 写法不一致，猜错的代价是
+  新机装不上还查不出原因。v1.4.0 在 CI 上 `-P 16` 失败回退，但结构体检显示产物
+  native 库本来就是 **16 KB 对齐**（AGP 8.9+ 自己摆好的），最终以体检报告为准。
 
 签完立刻 `apksigner verify --min-sdk-version 24`，验不过就 `exit 1`——
 自己都不认的包不允许进 Release。
+
+> ⚠️ **仍未解决的人工项**：仓库尚未配置 `KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` /
+> `KEY_ALIAS` / `KEY_PASSWORD` 四个 Secret。CI 每次现生成调试证书，意味着
+> **v1.4.0 能装，但下一版无法覆盖安装**（系统报「与已安装应用签名不一致」，
+> 极易与「解析包时出现问题」混淆）。发下一版前必须配置固定证书。
 
 ### 10.3 发布前结构体检（`scripts/verify_apk.py`）
 
