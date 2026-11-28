@@ -121,7 +121,17 @@ git push origin v1.0.1
 | `KEY_ALIAS` | key 别名 |
 | `KEY_PASSWORD` | key 口令 |
 
-生成 keystore（只做一次，本地保存好）：
+最省事的是跑现成脚本：它会自动找 `keytool`、生成随机强口令，把 4 个 Secret 的值和
+可直接复制的 `gh secret set` 命令全部打印出来（加 `--apply` 可在已登录 `gh` 时直接写入仓库）：
+
+```bash
+bash scripts/setup_signing.sh
+```
+
+生成物落在 `dist/`（已被 `.gitignore` 忽略）：`release.jks`、`keystore.base64`、`signing-secrets.txt`。
+**这三个文件要另外离线备份**，私钥丢了就再也无法给老用户升级。
+
+也可以手工生成 keystore（只做一次，本地保存好）：
 
 ```bash
 keytool -genkeypair -v \
