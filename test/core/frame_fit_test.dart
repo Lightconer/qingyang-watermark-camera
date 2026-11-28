@@ -88,7 +88,7 @@ void main() {
         const LayoutSize(400, 300),
         const LayoutSize(360, 600),
       );
-      final bandInPhoto = LayoutRect(0, 270, 400, 30);
+      const bandInPhoto = LayoutRect(0, 270, 400, 30);
       final inBox = fit.toBox(bandInPhoto);
       expect(inBox.bottom, closeTo(fit.rect.bottom, 1e-9));
       expect(inBox.width, closeTo(fit.rect.width, 1e-9));

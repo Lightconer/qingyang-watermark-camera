@@ -5,7 +5,6 @@ import 'package:flutter/painting.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/layout/layout_engine.dart';
-import '../../core/models/template.dart';
 
 /// 水印渲染引擎接口。
 ///

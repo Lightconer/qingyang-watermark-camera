@@ -194,7 +194,7 @@ class LayoutEngine {
     // 通栏位置下角标与正文同一行，必须先把角标宽度从可用宽度里扣掉，
     // 否则长文本会直接压到角标底下（旧版就是这么糊掉的）。
     double reserveBadge(double size0) =>
-        wantsBadge && style.position.isFullWidth ? _badgeWidth(badgeText!, size0) + padding : 0;
+        wantsBadge && style.position.isFullWidth ? _badgeWidth(badgeText, size0) + padding : 0;
 
     var denseFields = buildFields(compact);
 
@@ -266,7 +266,7 @@ class LayoutEngine {
     LayoutRect? badge;
     if (wantsBadge) {
       final badgeFont = fontSize * 0.8;
-      final badgeWidth = _badgeWidth(badgeText!, fontSize);
+      final badgeWidth = _badgeWidth(badgeText, fontSize);
       final badgeHeight = badgeFont * 1.55;
       // 通栏：角标放在底板内右上角（横向空间已扣掉，不会压字）。
       // 浮块（左下/右下）：角标移到底板外侧上方，既是元道那种"角标+块"的观感，
