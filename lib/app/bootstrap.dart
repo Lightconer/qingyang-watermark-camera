@@ -12,6 +12,9 @@ import '../engines/storage/settings_store.dart';
 import '../engines/storage/storage_engine.dart';
 import '../engines/storage/template_store.dart';
 import '../engines/time/time_engine.dart';
+import '../engines/update/apk_installer.dart';
+import '../engines/update/update_engine.dart';
+import '../engines/update/update_service.dart';
 import '../engines/watermark/watermark_renderer.dart';
 import '../engines/weather/weather_engine.dart';
 import '../features/feature_modules.dart';
@@ -71,6 +74,11 @@ Future<AppServices> bootstrapServices() async {
       engine: const MediaStoreGalleryExportEngine(),
       isEnabled: () => settings.exportToGallery,
       albumName: () => settings.galleryAlbum,
+    ),
+    update: UpdateService(
+      engine: GitHubUpdateEngine(),
+      installer: const NativeApkInstaller(),
+      settings: settings,
     ),
     profiles: profiles,
     templates: templates,

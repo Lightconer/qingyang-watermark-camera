@@ -17,6 +17,7 @@ import '../engines/storage/settings_store.dart';
 import '../engines/storage/storage_engine.dart';
 import '../engines/storage/template_store.dart';
 import '../engines/time/time_engine.dart';
+import '../engines/update/update_service.dart';
 import '../engines/watermark/watermark_renderer.dart';
 import '../engines/weather/weather_engine.dart';
 import 'feature_registry.dart';
@@ -37,6 +38,7 @@ class AppServices {
     required this.weather,
     required this.media,
     required this.gallery,
+    required this.update,
     required this.profiles,
     required this.templates,
     required this.registry,
@@ -57,6 +59,9 @@ class AppServices {
 
   /// 相册输出：成品落盘后再复制到系统相册的独立相册（可关）。
   final GalleryExportService gallery;
+
+  /// 远程更新：查 GitHub Releases → 下载 → 校验 → 交给系统安装器。
+  final UpdateService update;
   final ProfileRegistry profiles;
   final TemplateStore templates;
   final FeatureRegistry registry;

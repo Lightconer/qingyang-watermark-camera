@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/extensions/watermark_field_provider.dart';
 import '../../core/models/template.dart';
+import '../../core/models/types.dart';
 import '../../core/policy/album_policy.dart';
 
 /// 设置存储：所有开关、密钥、默认模板、输出路径、台账配置集中在这里。
@@ -75,6 +76,41 @@ class SettingsStore extends ChangeNotifier {
 
   Future<void> setCaptureModeId(String value) async {
     await _prefs.setString('output.profile', value);
+    notifyListeners();
+  }
+
+  // ---- 远程更新 ----
+  /// 冷启动自动检查更新（关掉后 [UpdateService.checkIfDue] 不发任何请求）。
+  bool get autoCheckUpdate => _prefs.getBool('update.auto') ?? true;
+
+  /// 更新源 owner/repo，分叉部署时改这里。
+  String get updateRepo =>
+      _prefs.getString('update.repo') ?? AppIdentity.updateRepo;
+
+  /// 上次检查时间（毫秒时间戳），用于 24 小时节流。
+  DateTime? get lastUpdateCheckAt {
+    final ms = _prefs.getInt('update.lastCheck');
+    return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  /// 上次发现的新版本标签；已是最新时为空串。
+  String get latestKnownVersion => _prefs.getString('update.latest') ?? '';
+
+  Future<void> setAutoCheckUpdate(bool value) => _setBool('update.auto', value);
+
+  Future<void> setUpdateRepo(String value) async {
+    final repo = value.trim();
+    await _prefs.setString('update.repo', repo.isEmpty ? AppIdentity.updateRepo : repo);
+    notifyListeners();
+  }
+
+  Future<void> setLastUpdateCheck(DateTime value) async {
+    await _prefs.setInt('update.lastCheck', value.millisecondsSinceEpoch);
+    notifyListeners();
+  }
+
+  Future<void> setLatestKnownVersion(String tag) async {
+    await _prefs.setString('update.latest', tag.trim());
     notifyListeners();
   }
 

@@ -70,6 +70,8 @@ cat > "$MANIFEST" <<'MANIFEST_EOF'
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- 录制带水印视频时需要录音；仅拍照不触发 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 远程更新：把下载好的 APK 交给 PackageInstaller 安装（用户仍需在系统界面确认） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
@@ -122,6 +124,15 @@ cat > "$MANIFEST" <<'MANIFEST_EOF'
                 <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
+
+        <!-- PackageInstaller 需要用户确认时会回这条广播，由接收器拉起系统确认界面 -->
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.qingyang.watermark.INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
 
         <meta-data
             android:name="flutterEmbedding"
@@ -245,8 +256,10 @@ cat > "$KOTLIN_DIR/MainActivity.kt" <<'KOTLIN_EOF'
 package com.qingyang.watermark
 
 import android.Manifest
+import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.net.Uri
@@ -260,11 +273,12 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * 宿主 Activity：只做四件事
- * 1. 暴露设备型号（水印"设备型号"字段）；
+ * 宿主 Activity：只做五件事
+ * 1. 暴露设备型号与版本号（水印字段 / 远程更新的当前版本）；
  * 2. 接收 ACTION_SEND（image 类型）分享，把图片复制到缓存目录，供 Dart 侧导入；
  * 3. 把成品写入系统相册的独立相册（MediaStore）；
- * 4. 保证单实例（singleTop），避免分享时重复启动。
+ * 4. 把下载好的更新包交给 PackageInstaller 安装；
+ * 5. 保证单实例（singleTop），避免分享时重复启动。
  */
 class MainActivity : FlutterActivity() {
     private val sharedPaths = mutableListOf<String>()
@@ -276,6 +290,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "model" -> result.success("${Build.MANUFACTURER} ${Build.MODEL}")
+                    "version" -> result.success(versionName())
                     else -> result.notImplemented()
                 }
             }
@@ -310,6 +325,41 @@ class MainActivity : FlutterActivity() {
                                 }
                             } catch (error: Exception) {
                                 result.error("io_error", error.message ?: "写入相册失败", null)
+                            }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.qingyang.watermark/update")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "install" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrBlank()) {
+                            result.error("bad_args", "缺少安装包路径", null)
+                        } else {
+                            try {
+                                result.success(startInstall(path))
+                            } catch (error: Exception) {
+                                result.error("install_failed", error.message ?: "无法启动安装", null)
+                            }
+                        }
+                    }
+                    "openUrl" -> {
+                        val url = call.argument<String>("url")
+                        if (url.isNullOrBlank()) {
+                            result.error("bad_args", "缺少链接", null)
+                        } else {
+                            try {
+                                startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                                result.success(true)
+                            } catch (error: Exception) {
+                                result.error("open_failed", error.message ?: "无法打开链接", null)
                             }
                         }
                     }
@@ -405,6 +455,44 @@ class MainActivity : FlutterActivity() {
         return uri.toString()
     }
 
+    /** 版本名：取 PackageManager 的真实值，发版改 versionName 后自动跟着变。 */
+    private fun versionName(): String {
+        return try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "0.0.0"
+        } catch (_: Exception) {
+            "0.0.0"
+        }
+    }
+
+    /**
+     * 用 PackageInstaller 会话安装 APK：不把文件抛给别的应用、也不依赖 FileProvider，
+     * 系统用自己的安装界面走完确认流程（用户仍需手动点"安装"）。
+     */
+    private fun startInstall(apkPath: String): Int {
+        val file = File(apkPath)
+        if (!file.exists()) throw IllegalStateException("安装包不存在")
+        val installer = packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        val sessionId = installer.createSession(params)
+        installer.openSession(sessionId).use { session ->
+            file.inputStream().use { input ->
+                session.openWrite("base.apk", 0, file.length()).use { output ->
+                    input.copyTo(output)
+                    session.fsync(output)
+                }
+            }
+            val status = Intent(InstallResultReceiver.ACTION).setPackage(packageName)
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pending = PendingIntent.getBroadcast(this, sessionId, status, flags)
+            session.commit(pending.intentSender)
+        }
+        return sessionId
+    }
+
     /** 同名时追加序号，绝不覆盖相册里已有的图。 */
     private fun uniqueFile(dir: File, name: String): File {
         val base = name.substringBeforeLast('.', name)
@@ -431,7 +519,46 @@ class MainActivity : FlutterActivity() {
     }
 }
 KOTLIN_EOF
-echo "[bootstrap] MainActivity.kt 已写入（设备型号 / ACTION_SEND / 相册写入）"
+echo "[bootstrap] MainActivity.kt 已写入（设备型号 / 版本号 / ACTION_SEND / 相册写入 / 安装）"
+
+cat > "$KOTLIN_DIR/InstallResultReceiver.kt" <<'RECEIVER_EOF'
+package com.qingyang.watermark
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInstaller
+import android.os.Build
+
+/**
+ * PackageInstaller 的回调接收器。
+ *
+ * 会话提交后系统不会直接弹确认框，而是回一条 STATUS_PENDING_USER_ACTION 广播，
+ * 由接收器把系统给的确认 Intent 拉起来。缺少这一步的表现是：
+ * 调用成功但屏幕上什么都不发生。清单里必须声明 exported="false"，
+ * 广播由本应用自己发出的 PendingIntent 触发，不需要对外开放。
+ */
+class InstallResultReceiver : BroadcastReceiver() {
+    @Suppress("DEPRECATION")
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != ACTION) return
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        if (status != PackageInstaller.STATUS_PENDING_USER_ACTION) return
+        val confirm = if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+        } else {
+            intent.getParcelableExtra(Intent.EXTRA_INTENT)
+        }
+        confirm?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        confirm?.let { context.startActivity(it) }
+    }
+
+    companion object {
+        const val ACTION = "com.qingyang.watermark.INSTALL_RESULT"
+    }
+}
+RECEIVER_EOF
+echo "[bootstrap] InstallResultReceiver.kt 已写入（安装确认回调）"
 
 # ---------------------------------------------------------------- 签名
 if [ -n "${KEYSTORE_BASE64:-}" ]; then

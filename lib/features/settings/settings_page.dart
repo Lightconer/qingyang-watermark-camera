@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -5,6 +7,8 @@ import '../../app/router.dart';
 import '../../app/services.dart';
 import '../../core/models/template.dart';
 import '../../core/policy/album_policy.dart';
+import '../../engines/update/apk_installer.dart';
+import '../../engines/update/update_engine.dart';
 import '../../core/models/types.dart';
 
 /// 设置页：字段、模板、API Key、输出路径、台账、功能模块集中在这里。
@@ -298,6 +302,8 @@ class SettingsPage extends StatelessWidget {
             _sectionTitle(context, section.title),
             Card(child: section.builder(context)),
           ],
+          _sectionTitle(context, '更新'),
+          _UpdateSection(services: services),
           _sectionTitle(context, '关于'),
           Card(
             child: Column(
@@ -469,3 +475,264 @@ String fieldLabel(AppServices services, String id) {
 /// 便捷：判断某字段是否属于"样式级元素"（二维码/LOGO 不进入文字行）。
 bool isStyleLevelField(String id) =>
     id == WatermarkFieldIds.qr || id == WatermarkFieldIds.logo;
+
+/// 远程更新分区：查 GitHub Releases → 下载 → 校验 SHA256 → 交给系统安装器。
+///
+/// 独立成 StatefulWidget 而不是塞进设置页主 build：检查/下载是异步且有进度状态，
+/// 放主 build 里会让整页跟着重建。
+class _UpdateSection extends StatefulWidget {
+  const _UpdateSection({required this.services});
+
+  final AppServices services;
+
+  @override
+  State<_UpdateSection> createState() => _UpdateSectionState();
+}
+
+class _UpdateSectionState extends State<_UpdateSection> {
+  String? _current;
+  bool _checking = false;
+
+  AppServices get services => widget.services;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final version = await services.update.currentVersionLabel();
+    if (!mounted) return;
+    setState(() => _current = version);
+  }
+
+  String get _statusHint {
+    final latest = services.settings.latestKnownVersion;
+    if (latest.isNotEmpty) return '上次检查发现 $latest，可立即更新';
+    final last = services.settings.lastUpdateCheckAt;
+    if (last == null) return '尚未检查过更新';
+    final local = last.toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '上次检查 ${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}';
+  }
+
+  Future<void> _check() async {
+    setState(() => _checking = true);
+    final result = await services.update.checkNow();
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      _current = result.currentVersion;
+    });
+    final release = result.release;
+    if (result.hasUpdate && release != null) {
+      await _showReleaseDialog(release);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.describe())),
+      );
+    }
+  }
+
+  Future<void> _showReleaseDialog(UpdateRelease release) async {
+    final notes = release.notes.isEmpty ? '该版本未附更新说明。' : release.notes;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('发现新版本 v${release.version}'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('当前版本 ${_current ?? '-'} · 安装包 ${release.sizeLabel}'),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 220),
+                child: SingleChildScrollView(child: Text(notes)),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('稍后'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'page'),
+            child: const Text('发布页'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, 'install'),
+            child: const Text('下载并安装'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'install') {
+      await _downloadAndInstall(release);
+    } else if (action == 'page') {
+      await services.update.openReleasePage(release);
+    }
+  }
+
+  Future<void> _downloadAndInstall(UpdateRelease release) async {
+    final progress = ValueNotifier<double>(0);
+    // 记录进度框是否还在栈上：用户按返回键提前关掉时，后面的 pop 会把设置页弹掉。
+    var dialogOpen = true;
+    void closeProgress() {
+      if (!dialogOpen) return;
+      dialogOpen = false;
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('正在下载更新'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ValueListenableBuilder<double>(
+              valueListenable: progress,
+              builder: (context, value, _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  LinearProgressIndicator(value: value <= 0 ? null : value),
+                  const SizedBox(height: 12),
+                  Text(value <= 0
+                      ? '正在连接更新源…'
+                      : '已下载 ${(value * 100).toStringAsFixed(0)}%'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '下载完成后会校验 SHA256，再由系统安装器安装。',
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    ).then((_) => dialogOpen = false));
+
+    final result = await services.update.installRelease(
+      release,
+      onProgress: (received, total) {
+        if (total <= 0) return;
+        progress.value = (received / total).clamp(0.0, 1.0);
+      },
+    );
+    if (!mounted) return;
+    closeProgress();
+
+    switch (result.status) {
+      case ApkInstallStatus.checksumMismatch:
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('安装包校验失败'),
+            content: Text(
+              '${result.message}\n\n'
+              '为安全起见已丢弃下载内容、未做安装。'
+              '建议到发布页手动下载，并核对 SHA256SUMS.txt。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('知道了'),
+              ),
+            ],
+          ),
+        );
+        break;
+      case ApkInstallStatus.started:
+      case ApkInstallStatus.unsupported:
+      case ApkInstallStatus.downloadFailed:
+      case ApkInstallStatus.installFailed:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.message)),
+        );
+        break;
+    }
+  }
+
+  Future<void> _editRepo() async {
+    final controller = TextEditingController(text: services.settings.updateRepo);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('更新源'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'owner/repo，例如 Lightconer/qingyang-watermark-camera',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (value == null) return;
+    await services.settings.setUpdateRepo(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = services.settings;
+    return Card(
+      child: Column(
+        children: [
+          ListTile(
+            title: const Text('当前版本'),
+            subtitle: Text(_current ?? '读取中…'),
+            trailing: const Icon(Icons.info_outline, size: 18),
+          ),
+          const Divider(height: 1),
+          SwitchListTile(
+            value: settings.autoCheckUpdate,
+            onChanged: settings.setAutoCheckUpdate,
+            title: const Text('自动检查更新'),
+            subtitle: const Text('启动时检查一次（24 小时内不重复）；关闭后不发起任何网络请求'),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            title: const Text('更新源'),
+            subtitle: Text(settings.updateRepo),
+            trailing: const Icon(Icons.edit_outlined, size: 18),
+            onTap: _editRepo,
+          ),
+          const Divider(height: 1),
+          ListTile(
+            title: const Text('检查更新'),
+            subtitle: Text(_statusHint),
+            trailing: _checking
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+            onTap: _checking ? null : _check,
+          ),
+        ],
+      ),
+    );
+  }
+}

@@ -9,6 +9,13 @@ class AppIdentity {
   static const String packageName = 'com.qingyang.watermark';
   static const String softwareTag = 'QingyangWatermarkCamera';
   static const String schemaVersion = '1.0';
+
+  /// 编译期版本兜底：优先用系统 `versionName`，原生取不到时才用它。
+  /// 发版时与 `pubspec.yaml` 的 version 一起改。
+  static const String version = '1.1.0';
+
+  /// 默认更新源（与 release.yml 发布的仓库一致），设置页可改成分叉仓库。
+  static const String updateRepo = 'Lightconer/qingyang-watermark-camera';
 }
 
 /// 照片来源。`camera` 为现场拍摄，其余均为导入。

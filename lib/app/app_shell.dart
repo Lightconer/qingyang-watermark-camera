@@ -19,6 +19,7 @@ class _AppShellState extends State<AppShell> {
   final GlobalKey<CapturePageState> _captureKey = GlobalKey<CapturePageState>();
   CaptureController? _controller;
   int _tab = 0;
+  bool _updateCheckScheduled = false;
 
   @override
   void didChangeDependencies() {
@@ -27,6 +28,27 @@ class _AppShellState extends State<AppShell> {
     final services = ServicesScope.of(context);
     _controller = CaptureController(services: services);
     _controller!.initialize();
+    _scheduleUpdateCheck(services);
+  }
+
+  /// 冷启动检查更新：仅在开启「自动检查更新」且距上次检查超过 24 小时时发一次请求，
+  /// 结果只做一条可关闭的提示，不打断拍摄——外勤点开 APP 是为了拍照，不是等更新。
+  void _scheduleUpdateCheck(AppServices services) {
+    if (_updateCheckScheduled) return;
+    _updateCheckScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final result = await services.update.checkIfDue();
+      if (!mounted || result == null || !result.hasUpdate) return;
+      final release = result.release;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('发现新版本 v${release?.version}（当前 ${result.currentVersion}）'),
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(
+          label: '去更新',
+          onPressed: () => Navigator.of(context).pushNamed(AppRoutes.settings),
+        ),
+      ));
+    });
   }
 
   @override

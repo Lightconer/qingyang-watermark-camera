@@ -79,6 +79,7 @@ app ──▶ features ──▶ engines ──▶ core
 | 存储 | `StorageEngine` | `FileStorageEngine` | `FakeStorageEngine` |
 | 媒体入口 | `MediaGateway` | `PlatformMediaGateway` | `FakeMediaGateway` |
 | 相册输出 | `GalleryExportEngine` | `MediaStoreGalleryExportEngine` | `FakeGalleryExportEngine` |
+| 远程更新 | `UpdateEngine` + `ApkInstaller` | `GitHubUpdateEngine` + `NativeApkInstaller` | `FakeUpdateEngine` + `FakeApkInstaller` |
 
 ---
 
@@ -284,7 +285,27 @@ abstract class FeatureModule {
 
 ---
 
-## 8. 构建环境注意事项（`scripts/bootstrap_android.sh`）
+## 8. 远程更新（应用内自更新）
+
+设置页「更新」分区：查 GitHub Releases → 判断版本 → 下载 → 校验 SHA256 → 交给系统安装器。
+
+* 查：`UpdateEngine.check()` 请求 `api.github.com/repos/<repo>/releases/latest`
+  （10s 超时、带 UA、403 判为限流、404 判为无发布记录），用 `AppVersion` 逐段比较
+  `tag_name` 与系统 `versionName`；同号预发布版低于正式版，不会把 beta 推给现场。
+* 装：`ApkInstaller` 自己下载字节（只有这样才拿得到哈希），与发布附带的
+  `SHA256SUMS.txt` 比对，**不一致直接丢弃、不安装**；一致才写进 `PackageInstaller`
+  会话，由系统安装界面完成确认（不静默安装、不申请 INSTALL_PACKAGES 系统权限）。
+* 安装回调：`PackageInstaller` 提交后回一条 `STATUS_PENDING_USER_ACTION` 广播，
+  由清单里 `exported="false"` 的 `InstallResultReceiver` 拉起系统确认界面——
+  少了这一步的表现是"调用成功但屏幕没反应"。
+* 隐私：`自动检查更新` 默认开但**24 小时节流**，冷启动最多一天一次；关掉后
+  `UpdateService.checkIfDue()` 直接返回 null，不发任何请求。手动点「检查更新」
+  属于用户明确操作，不受该开关限制。
+* 更新源可在设置里改成 `owner/repo`（分叉部署或私有分发时用），留空回退默认仓库。
+
+---
+
+## 9. 构建环境注意事项（`scripts/bootstrap_android.sh`）
 
 仓库不提交 `android/`，平台目录在构建前由脚本现生成。踩过的坑记在这里，改动脚本前先读：
 
