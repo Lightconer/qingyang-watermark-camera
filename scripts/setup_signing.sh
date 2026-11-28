@@ -4,7 +4,11 @@
 # 用法（Git Bash / macOS / Linux 均可，在项目根目录执行）：
 #   bash scripts/setup_signing.sh            生成证书 + 打印命令（默认，不写 GitHub）
 #   bash scripts/setup_signing.sh --print    复用已有证书，只重新打印命令，不会换证书
-#   bash scripts/setup_signing.sh --apply    生成后直接写入 GitHub Secrets（需已登录 gh）
+#   bash scripts/setup_signing.sh --check   只检查 gh / 登录是否就绪，不生成证书、不写 GitHub
+#   bash scripts/setup_signing.sh --apply    把 4 个 Secret 写入 GitHub；证书已生成就复用，不会换证书
+#
+# --apply 会自己把环境补齐：找不到 gh 就自动装到 ~/.local/gh，未登录就复用
+# Git 凭据管理器里的 GitHub 令牌（或提示跑一次 gh auth login --web）。
 #
 # 证书生成两条路，自动选择：
 #   A) 找到 keytool（JDK / Android Studio JBR）→ 用它生成，最标准；
@@ -31,11 +35,13 @@ REPO="${REPO:-Lightconer/qingyang-watermark-camera}"
 ALIAS="${ALIAS:-qingyang}"
 APPLY=0
 PRINT_ONLY=0
+CHECK_ONLY=0
 case "${1:-}" in
   --apply) APPLY=1 ;;
   --print) PRINT_ONLY=1 ;;
+  --check) CHECK_ONLY=1 ;;
   "") ;;
-  *) echo "[setup] 未知参数：${1}（可用 --print / --apply）" >&2; exit 2 ;;
+  *) echo "[setup] 未知参数：${1}（可用 --print / --check / --apply）" >&2; exit 2 ;;
 esac
 
 DIST="$ROOT_DIR/dist"
@@ -52,12 +58,99 @@ R_COMMANDS="dist/secret-commands.txt"
 
 mkdir -p "$DIST"
 
+# ---------------------------------------------------------------- GH 自举
+# --apply 不该因为「没装 gh / 没登录」而卡住：能探测就探测，能装就装，
+# 实在没有登录态就复用 Git 凭据管理器里已有的 GitHub 令牌。
+GH_BIN="${GH_BIN:-}"
+
+find_gh() {
+  if [ -n "${GH_BIN:-}" ] && [ -x "$GH_BIN" ]; then echo "$GH_BIN"; return 0; fi
+  if command -v gh >/dev/null 2>&1; then command -v gh; return 0; fi
+  local c
+  for c in \
+    "$HOME/.local/gh/bin/gh.exe" \
+    "$HOME/.local/gh/bin/gh" \
+    "$HOME/AppData/Local/Programs/GitHub CLI/gh.exe" \
+    "/c/Program Files/GitHub CLI/gh.exe" \
+    "$HOME/scoop/apps/gh/current/bin/gh.exe" \
+    "/usr/local/bin/gh" ; do
+    if [ -x "$c" ]; then echo "$c"; return 0; fi
+  done
+  return 1
+}
+
+install_gh() {
+  local dest="$HOME/.local/gh" ver="2.106.0" zip="${TMPDIR:-/tmp}/gh_cli.zip" url
+  case "$(uname -s 2>/dev/null || echo unknown)" in
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+      url="https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_windows_amd64.zip" ;;
+    Darwin)
+      echo "[setup] 未装 gh，请先跑：brew install gh" >&2; return 1 ;;
+    Linux)
+      echo "[setup] 未装 gh，请先跑：sudo apt install gh / 见 https://cli.github.com/" >&2; return 1 ;;
+    *) return 1 ;;
+  esac
+  if ! command -v curl >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
+    echo "[setup] 自动安装需要 curl + unzip，请手动安装 gh：https://cli.github.com/" >&2
+    return 1
+  fi
+  echo "[setup] 未找到 gh，自动下载到 $dest/bin/gh.exe ..." >&2
+  mkdir -p "$dest"
+  # 本机 Git 环境的证书链不完整时先降级重试，仅用于下载公开的 gh 官方产物。
+  curl -fsSL --max-time 240 -o "$zip" "$url" 2>/dev/null \
+    || curl -kfsSL --max-time 240 -o "$zip" "$url" 2>/dev/null \
+    || { echo "[setup] 下载 gh 失败，请手动安装：https://cli.github.com/" >&2; return 1; }
+  unzip -oq "$zip" -d "$dest" || { rm -f "$zip"; return 1; }
+  rm -f "$zip"
+  if [ -x "$dest/bin/gh.exe" ]; then echo "$dest/bin/gh.exe"; return 0; fi
+  if [ -x "$dest/bin/gh" ]; then echo "$dest/bin/gh"; return 0; fi
+  return 1
+}
+
+ensure_gh_auth() {
+  local gh_bin="$1" pass
+  if "$gh_bin" auth status >/dev/null 2>&1; then
+    echo "[setup] gh 已登录 GitHub" >&2
+    return 0
+  fi
+  # 没登录态也不强求交互：Git 凭据管理器里通常已有可用令牌。
+  pass="$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null \
+    | sed -n 's/^password=//p' | tr -d '\r\n')"
+  if [ -n "$pass" ] && GH_TOKEN="$pass" "$gh_bin" api user >/dev/null 2>&1; then
+    export GH_TOKEN="$pass"
+    echo "[setup] 复用 Git 凭据中的 GitHub 令牌（仅本次进程有效）" >&2
+    return 0
+  fi
+  echo "[setup] 尚未登录 GitHub，请先跑一次：\"$gh_bin\" auth login --web" >&2
+  return 1
+}
+
+prepare_gh() {
+  GH_BIN="$(find_gh || true)"
+  [ -n "$GH_BIN" ] || GH_BIN="$(install_gh || true)"
+  if [ -z "$GH_BIN" ] || [ ! -x "$GH_BIN" ]; then
+    echo "[setup] 找不到 gh，也无法自动安装：https://cli.github.com/" >&2
+    return 1
+  fi
+  ensure_gh_auth "$GH_BIN" || return 1
+  echo "[setup] gh 就绪：$GH_BIN"
+}
+
+if [ "$CHECK_ONLY" -eq 1 ] || [ "$APPLY" -eq 1 ]; then
+  prepare_gh || exit 1
+fi
+if [ "$CHECK_ONLY" -eq 1 ]; then
+  echo "[setup] 环境检查通过，可以跑：bash scripts/setup_signing.sh --apply"
+  exit 0
+fi
+
 # ---------------------------------------------------------------- 输出与写入
 # 生成"填好值"的命令文件，同时打印纯命令，最后按 --apply 决定是否真的写 GitHub。
 emit_commands() {
   cat > "$COMMANDS" <<EOF
 # 在仓库根目录执行（Git Bash / PowerShell 均可）。含明文口令，切勿提交。
 # 由 scripts/setup_signing.sh 于 $(date '+%Y-%m-%d %H:%M:%S') 生成。
+# 提示找不到 gh 时：把 gh 换成 ~/.local/gh/bin/gh.exe，或把该目录加进 PATH 后重开终端。
 gh secret set KEYSTORE_BASE64   -R "$REPO" < "$R_B64"
 gh secret set KEYSTORE_PASSWORD -R "$REPO" --body "$PASS"
 gh secret set KEY_ALIAS         -R "$REPO" --body "$ALIAS"
@@ -81,15 +174,23 @@ EOF
   echo "⚠ 请另外离线备份 dist/release.jks 与 $R_VALUES；私钥丢了无法补。"
 
   if [ "$APPLY" -eq 1 ]; then
-    if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
-      echo "[setup] --apply 需要已安装且已登录的 gh（先跑 gh auth login）" >&2
+    "$GH_BIN" secret set KEYSTORE_BASE64   -R "$REPO" < "$B64_FILE"
+    "$GH_BIN" secret set KEYSTORE_PASSWORD -R "$REPO" --body "$PASS"
+    "$GH_BIN" secret set KEY_ALIAS         -R "$REPO" --body "$ALIAS"
+    "$GH_BIN" secret set KEY_PASSWORD     -R "$REPO" --body "$PASS"
+    echo "[setup] 已写入 $REPO 的 4 个 Secret，正在核对名字："
+    local listed missing=0 name
+    listed="$("$GH_BIN" secret list -R "$REPO" 2>/dev/null || true)"
+    for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+      case "$listed" in
+        *"$name"*) echo "  ✓ $name" ;;
+        *) echo "  ✗ $name 未查到" >&2; missing=1 ;;
+      esac
+    done
+    if [ "$missing" -ne 0 ]; then
+      echo "[setup] 校验未通过，请检查 gh 是否有该仓库的 Secrets 写权限" >&2
       exit 1
     fi
-    gh secret set KEYSTORE_BASE64   -R "$REPO" < "$B64_FILE"
-    gh secret set KEYSTORE_PASSWORD -R "$REPO" --body "$PASS"
-    gh secret set KEY_ALIAS         -R "$REPO" --body "$ALIAS"
-    gh secret set KEY_PASSWORD     -R "$REPO" --body "$PASS"
-    echo "[setup] 已写入 $REPO 的 4 个 Secret。"
   fi
 }
 
@@ -112,9 +213,27 @@ if [ "$PRINT_ONLY" -eq 1 ]; then
 fi
 
 if [ -f "$JKS" ]; then
+  # --apply 是「把已经生成好的 4 个值写进去」，绝不能重新生成证书：
+  # 换证书等于让已装用户以后都装不上升级包。
+  if [ "$APPLY" -eq 1 ]; then
+    if [ ! -s "$VALUES" ] || [ ! -s "$B64_FILE" ]; then
+      echo "[setup] 证书在，但 $R_VALUES / $R_B64 缺失，无法复用" >&2
+      exit 1
+    fi
+    PASS="$(grep '^KEYSTORE_PASSWORD=' "$VALUES" | cut -d'=' -f2-)"
+    ALIAS="$(grep '^KEY_ALIAS=' "$VALUES" | cut -d'=' -f2-)"
+    if [ -z "$PASS" ] || [ -z "$ALIAS" ]; then
+      echo "[setup] $R_VALUES 格式异常，缺少 KEYSTORE_PASSWORD / KEY_ALIAS" >&2
+      exit 1
+    fi
+    echo "[setup] 复用已有证书（未更换），直接写入 GitHub Secrets"
+    emit_commands
+    exit 0
+  fi
   echo "[setup] ⚠ 已存在 dist/release.jks" >&2
-  echo "[setup] 复用已有证书才能给老用户连续升级；只是想重新看命令请跑：" >&2
-  echo "[setup]   bash scripts/setup_signing.sh --print" >&2
+  echo "[setup] 要把已生成的 4 个 Secret 写进 GitHub，请跑：" >&2
+  echo "[setup]   bash scripts/setup_signing.sh --apply" >&2
+  echo "[setup] 只重看命令：bash scripts/setup_signing.sh --print" >&2
   echo "[setup] 确实要换证书的话，先手动删除 dist/release.jks 再重跑。" >&2
   exit 1
 fi

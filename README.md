@@ -127,8 +127,14 @@ git push origin v1.0.1
 ```bash
 bash scripts/setup_signing.sh             # 生成证书 + 打印命令（默认，不写 GitHub）
 bash scripts/setup_signing.sh --print     # 忘了命令时重打，复用已有证书，不会换证书
-bash scripts/setup_signing.sh --apply     # 生成后直接写入仓库 Secrets（需已登录 gh）
+bash scripts/setup_signing.sh --check    # 只检查 gh / 登录是否就绪，不生成证书、不写 GitHub
+bash scripts/setup_signing.sh --apply     # 把 4 个 Secret 写入仓库；证书已生成就复用，不会换证书
 ```
+
+`--apply` 会自己把环境补齐：找不到 `gh` 就自动装到 `~/.local/gh`，没登录就复用 Git
+凭据管理器里已有的 GitHub 令牌（都不行才提示跑一次 `gh auth login --web`），写入后会
+逐个核对 4 个 Secret 名字。把 `~/.local/gh/bin` 加进 PATH，任意终端都能直接执行
+`secret-commands.txt` 里的命令。
 
 生成物落在 `dist/`（已被 `.gitignore` 忽略）：`release.jks`、`keystore.base64`、
 `signing-secrets.txt`（4 个明文值）、`secret-commands.txt`（4 条填好值的命令，打开即可整段复制）。
