@@ -97,7 +97,9 @@ if "$ZIPALIGN" -P 16 -p -f 4 "$APK_PATH" "$ALIGNED" >/dev/null 2>&1; then
 else
   rm -f "$ALIGNED"
   "$ZIPALIGN" -p -f 4 "$APK_PATH" "$ALIGNED"
-  echo "[sign] 当前 build-tools 不支持 -P，回退 4 KB 页对齐"
+  # 部分 build-tools 没有 -P。AGP 8.9+ 自己就会把 native 库按 16 KB 摆放，
+  # 这种情况下重排也不会降级；最终以结构体检报告的对齐粒度为准。
+  echo "[sign] 该 build-tools 无 -P 参数，按 4 KB 对齐重排"
 fi
 rm -f "$APK_PATH"
 mv "$ALIGNED" "$APK_PATH"
