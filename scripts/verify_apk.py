@@ -138,10 +138,10 @@ def main(argv):
         print("用法：python3 scripts/verify_apk.py <apk> [<apk> ...]", file=sys.stderr)
         return 2
 
+    reports = [check(path) for path in argv[1:]]
     failed = 0
-    for path in argv[1:]:
-        rep = check(path)
-        print(f"\n=== {path} ===")
+    for rep in reports:
+        print(f"\n=== {rep.path} ===")
         for line in rep.infos:
             print(f"  · {line}")
         if rep.errors:

@@ -57,15 +57,31 @@ APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
 
 KEYSTORE="android/app/release.jks"
 PROPS="android/key.properties"
+FALLBACK_SIGNING=0
 
+# 没配发布证书时的兜底：拿 AGP 刚才用过的调试证书重新签一遍。
+#
+# 这一段是「解析包时出现问题」的直接修复点：minSdk 24 时 AGP 认定 v1 签名
+# 只服务 Android 7 以下，默认**不生成** v1——而部分国产 ROM（荣耀/华为等）
+# 的安装器只要发现包里没有 META-INF/*.RSA，就直接判「包损坏」。
+# 所以哪怕没有发布证书，也必须用调试证书重签一遍把 v1 补上。
 if [ ! -f "$KEYSTORE" ] || [ ! -f "$PROPS" ]; then
-  emit_without_signing "未配置签名证书（KEYSTORE_BASE64 缺失）"
+  DEBUG_KS="${HOME}/.android/debug.keystore"
+  if [ ! -f "$DEBUG_KS" ]; then
+    emit_without_signing "未配置签名证书，且找不到调试证书（$DEBUG_KS）"
+  fi
+  KEYSTORE="$DEBUG_KS"
+  STORE_PASSWORD="android"
+  KEY_ALIAS="androiddebugkey"
+  KEY_PASSWORD="android"
+  FALLBACK_SIGNING=1
+  echo "[sign] ⚠ 未配置 KEYSTORE_BASE64，改用调试证书重签（补齐 v1 签名，但不适合正式分发）"
+else
+  # key.properties → 环境变量
+  STORE_PASSWORD="$(grep -E '^storePassword=' "$PROPS" | cut -d'=' -f2-)"
+  KEY_ALIAS="$(grep -E '^keyAlias=' "$PROPS" | cut -d'=' -f2-)"
+  KEY_PASSWORD="$(grep -E '^keyPassword=' "$PROPS" | cut -d'=' -f2-)"
 fi
-
-# key.properties → 环境变量
-STORE_PASSWORD="$(grep -E '^storePassword=' "$PROPS" | cut -d'=' -f2-)"
-KEY_ALIAS="$(grep -E '^keyAlias=' "$PROPS" | cut -d'=' -f2-)"
-KEY_PASSWORD="$(grep -E '^keyPassword=' "$PROPS" | cut -d'=' -f2-)"
 
 # ---------------------------------------------------------------- 1. 对齐
 # -P 16 是 16 KB 页对齐（build-tools 35+ 才有）。Android 15 的部分新机型
@@ -117,6 +133,16 @@ echo "[sign] 签名方案："
 "$APKSIGNER" verify --print-certs --min-sdk-version "$MIN_SDK" "$APK_PATH" \
   | grep -Ei 'Verified using v[0-9]|Signer #1 certificate DN|SHA-256 digest' | head -n 8 || true
 echo "[sign] 重签完成：$APK_PATH（$(du -h "$APK_PATH" | cut -f1)）"
+
+if [ "$FALLBACK_SIGNING" = "1" ]; then
+  echo "[sign] ----------------------------------------------------------------"
+  echo "[sign] ⚠  本次使用调试证书签名："
+  echo "[sign] ⚠  · 能装、能跑，但不能用于正式分发；"
+  echo "[sign] ⚠  · CI 每次构建都会生成新的调试证书，跨版本覆盖安装会失败。"
+  echo "[sign] ⚠  配置 KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD"
+  echo "[sign] ⚠  后签名才稳定，用户才能从旧版直接升级。"
+  echo "[sign] ----------------------------------------------------------------"
+fi
 
 if [ -n "$OUT_PATH" ]; then
   mkdir -p "$(dirname "$OUT_PATH")"
