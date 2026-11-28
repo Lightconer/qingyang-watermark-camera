@@ -169,6 +169,9 @@ def main(argv):
             print("  ✓ 结构检查通过")
 
     if failed:
+        # stdout 默认带缓冲、stderr 不带，CI 里两者合并时汇总会跑到明细前面，
+        # 让人先看到"禁止发布"却不知道是哪个包出的错。先 flush 再报。
+        sys.stdout.flush()
         print(f"\n{failed} 个包未通过结构检查，禁止发布", file=sys.stderr)
         return 1
     print("\n全部通过结构检查")
