@@ -8,6 +8,7 @@
     "source_badge",
     "time",
     "coords",
+    "heading",
     "altitude",
     "address",
     "weather",

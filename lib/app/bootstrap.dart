@@ -8,6 +8,7 @@ import '../engines/location/location_engine.dart';
 import '../engines/media/gallery_export_engine.dart';
 import '../engines/media/media_gateway.dart';
 import '../engines/metadata/metadata_engine.dart';
+import '../engines/sensor/compass_engine.dart';
 import '../engines/storage/settings_store.dart';
 import '../engines/storage/storage_engine.dart';
 import '../engines/storage/template_store.dart';
@@ -80,6 +81,7 @@ Future<AppServices> bootstrapServices() async {
       installer: const NativeApkInstaller(),
       settings: settings,
     ),
+    compass: NativeCompassEngine(),
     profiles: profiles,
     templates: templates,
     registry: registry,

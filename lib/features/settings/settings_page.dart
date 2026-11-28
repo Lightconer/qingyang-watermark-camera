@@ -10,6 +10,7 @@ import '../../core/policy/album_policy.dart';
 import '../../engines/update/apk_installer.dart';
 import '../../engines/update/update_engine.dart';
 import '../../core/models/types.dart';
+import '../../core/policy/heading.dart';
 
 /// 设置页：字段、模板、API Key、输出路径、台账、功能模块集中在这里。
 class SettingsPage extends StatelessWidget {
@@ -219,6 +220,44 @@ class SettingsPage extends StatelessWidget {
               ],
             ),
           ),
+          _sectionTitle(context, '取景与方位角'),
+          Card(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  value: services.settings.previewFill,
+                  onChanged: services.settings.setPreviewFill,
+                  title: const Text('取景框铺满屏幕'),
+                  subtitle: const Text(
+                    '关闭（默认）：按照片比例留边，屏幕看到的范围就是成片范围，最稳妥；\n'
+                    '开启：裁切铺满，画面更饱满，但成片边缘会比你看到的少一点。',
+                  ),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  value: services.settings.compassEnabled,
+                  onChanged: (value) async {
+                    await services.settings.setCompassEnabled(value);
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('返回拍摄页后生效')),
+                    );
+                  },
+                  title: const Text('方位角（指南针）'),
+                  subtitle: const Text(
+                    '读取设备方向传感器，把相机朝向写进水印；无传感器的设备自动隐藏该行，不会显示 0°',
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  title: const Text('方位角写法'),
+                  subtitle: Text(services.settings.headingFormat.label),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _pickHeadingFormat(context, services),
+                ),
+              ],
+            ),
+          ),
           _sectionTitle(context, '台账与校验'),
           Card(
             child: Column(
@@ -406,6 +445,49 @@ class SettingsPage extends StatelessWidget {
       ),
     );
     if (value != null) await onSubmit(value);
+  }
+
+  /// 方位角写法选择：底部弹层里直接给出"同一角度三种写法"的对照，
+  /// 比让人猜"十六方位"长什么样要省事。
+  Future<void> _pickHeadingFormat(
+    BuildContext context,
+    AppServices services,
+  ) async {
+    final current = services.settings.headingFormat;
+    final picked = await showModalBottomSheet<HeadingFormat>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+              child: Text(
+                '方位角写法',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '同一个朝向在画面上的三种写法，示例：42°',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ),
+            for (final format in HeadingFormat.values)
+              ListTile(
+                title: Text(format.label),
+                subtitle: Text(HeadingPolicy.format(42, style: format)),
+                trailing: format == current ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.pop(context, format),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (picked != null) await services.settings.setHeadingFormat(picked);
   }
 
   Future<void> _openFieldPool(BuildContext context, AppServices services) async {

@@ -1,6 +1,7 @@
 import '../models/photo_metadata.dart';
 import '../models/template.dart';
 import '../models/types.dart';
+import '../policy/heading.dart';
 
 /// 采集人 / 单位等可配置身份信息，来自设置页或模板取值。
 class IdentityInfo {
@@ -52,6 +53,7 @@ class FieldContext {
     this.identity = const IdentityInfo(),
     this.fingerprint,
     this.weatherAllowed = false,
+    this.headingFormat = HeadingFormat.cardinal8,
   });
 
   final CaptureMode mode;
@@ -68,6 +70,9 @@ class FieldContext {
 
   /// 天气是否允许出现在水印上（导入模式与离线模式默认关闭）。
   final bool weatherAllowed;
+
+  /// 方位角的展示口径（八方位 / 十六方位 / 仅角度），来自设置页。
+  final HeadingFormat headingFormat;
 
   bool get isImport => provenance.source.isImport;
 
@@ -113,6 +118,7 @@ class FieldContext {
       identity: identity,
       fingerprint: value,
       weatherAllowed: weatherAllowed,
+      headingFormat: headingFormat,
     );
   }
 }

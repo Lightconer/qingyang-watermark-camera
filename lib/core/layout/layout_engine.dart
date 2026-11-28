@@ -189,14 +189,26 @@ class LayoutEngine {
       return sorted.take(2).toList(growable: false);
     }
 
-    var denseFields = buildFields(compact);
-    var availableWidth = size.width - padding * 2;
-    if (wantsQr) {
-      availableWidth -= shortSide * style.qrSizeRatio + padding;
-    }
-    availableWidth = math.max(availableWidth, shortSide * 0.35);
+    final wantsBadge = style.showBadge && badgeText != null && badgeText.isNotEmpty;
 
-    var lines = _buildLines(denseFields, fontSize, availableWidth, compact);
+    // 通栏位置下角标与正文同一行，必须先把角标宽度从可用宽度里扣掉，
+    // 否则长文本会直接压到角标底下（旧版就是这么糊掉的）。
+    double reserveBadge(double size0) =>
+        wantsBadge && style.position.isFullWidth ? _badgeWidth(badgeText!, size0) + padding : 0;
+
+    var denseFields = buildFields(compact);
+
+    List<_PendingLine> layoutAt(double size0) {
+      var availableWidth = size.width - padding * 2;
+      if (wantsQr) {
+        availableWidth -= shortSide * style.qrSizeRatio + padding;
+      }
+      availableWidth -= reserveBadge(size0);
+      availableWidth = math.max(availableWidth, shortSide * 0.35);
+      return _buildLines(denseFields, size0, availableWidth, compact);
+    }
+
+    var lines = layoutAt(fontSize);
     var naturalHeight = _heightOf(lines, padding, style.lineSpacing);
 
     var guard = 0;
@@ -204,12 +216,12 @@ class LayoutEngine {
       guard++;
       if (fontSize > style.minFontSize * 1.05) {
         fontSize = math.max(style.minFontSize, fontSize * 0.9);
-        lines = _buildLines(denseFields, fontSize, availableWidth, compact);
+        lines = layoutAt(fontSize);
         naturalHeight = _heightOf(lines, padding, style.lineSpacing);
       } else if (!compact) {
         compact = true;
         denseFields = buildFields(true);
-        lines = _buildLines(denseFields, fontSize, availableWidth, compact);
+        lines = layoutAt(fontSize);
         naturalHeight = _heightOf(lines, padding, style.lineSpacing);
       } else {
         break;
@@ -233,9 +245,7 @@ class LayoutEngine {
 
     final positioned = <LayoutLine>[];
     var cursorTop = band.top + padding;
-    final textLeft = style.position == WatermarkPosition.bottomBar
-        ? band.left + padding
-        : band.left + padding;
+    final textLeft = band.left + padding;
     for (final line in lines) {
       positioned.add(LayoutLine(
         id: line.id,
@@ -254,14 +264,24 @@ class LayoutEngine {
     }
 
     LayoutRect? badge;
-    if (style.showBadge && badgeText != null && badgeText.isNotEmpty) {
+    if (wantsBadge) {
       final badgeFont = fontSize * 0.8;
-      final badgeWidth = measure(badgeText, badgeFont, true) + badgeFont * 1.2;
+      final badgeWidth = _badgeWidth(badgeText!, fontSize);
       final badgeHeight = badgeFont * 1.55;
-      final top = band.top + padding * 0.35;
-      final left = style.position == WatermarkPosition.bottomBar
-          ? band.right - padding - badgeWidth
-          : band.left + padding;
+      // 通栏：角标放在底板内右上角（横向空间已扣掉，不会压字）。
+      // 浮块（左下/右下）：角标移到底板外侧上方，既是元道那种"角标+块"的观感，
+      // 也不会盖住第一行。
+      final double top;
+      final double left;
+      if (style.position.isFullWidth) {
+        top = band.top + padding * 0.35;
+        left = band.right - padding - badgeWidth;
+      } else {
+        top = math.max(padding * 0.2, band.top - badgeHeight - padding * 0.35);
+        left = style.position == WatermarkPosition.bottomRight
+            ? band.right - badgeWidth
+            : band.left;
+      }
       badge = LayoutRect(left, top, badgeWidth, badgeHeight);
     }
 
@@ -313,6 +333,8 @@ class LayoutEngine {
     switch (style.position) {
       case WatermarkPosition.bottomBar:
         return LayoutRect(0, size.height - height, size.width, height);
+      case WatermarkPosition.topBar:
+        return LayoutRect(0, 0, size.width, height);
       case WatermarkPosition.bottomLeft:
         final width = math.min(
           size.width,
@@ -331,6 +353,12 @@ class LayoutEngine {
             width,
             height);
     }
+  }
+
+  /// 角标宽度：字号取正文的 0.8 倍，左右各留 0.6 个字号的呼吸位。
+  double _badgeWidth(String text, double fontSize) {
+    final badgeFont = fontSize * 0.8;
+    return measure(text, badgeFont, true) + badgeFont * 1.2;
   }
 
   double _heightOf(List<_PendingLine> lines, double padding, double lineSpacing) {

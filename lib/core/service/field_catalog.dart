@@ -1,6 +1,7 @@
 import '../extensions/watermark_field_provider.dart';
 import '../models/template.dart';
 import '../models/types.dart';
+import '../policy/heading.dart';
 import '../policy/policies.dart';
 
 /// 字段池 UI 描述（设置页 / 模板编辑器用）。
@@ -75,6 +76,7 @@ class FieldCatalog {
       case WatermarkFieldIds.sourceBadge:
         return '时间与来源';
       case WatermarkFieldIds.coords:
+      case WatermarkFieldIds.heading:
       case WatermarkFieldIds.altitude:
       case WatermarkFieldIds.address:
       case WatermarkFieldIds.weather:
@@ -176,6 +178,49 @@ class CoordsFieldProvider implements WatermarkFieldProvider {
       text: '定位失败',
       priority: 20,
       emphasize: true,
+    );
+  }
+}
+
+/// 方位角（相机朝向）。
+///
+/// 元道经纬相机这类现场取证工具的标志性字段之一：证明"这张照片是朝哪个方向拍的"。
+/// 只认设备传感器读数；无磁力计/旋转矢量的设备整字段不绘制，
+/// 绝不按 0°（正北）或上一次朝向编造。
+class HeadingFieldProvider implements WatermarkFieldProvider {
+  const HeadingFieldProvider();
+
+  @override
+  String get id => WatermarkFieldIds.heading;
+
+  @override
+  String get label => '方位角';
+
+  @override
+  int get priority => 25;
+
+  /// 导入链路没有可靠的朝向来源（原图 EXIF 的 GPSImgDirection 极少写），
+  /// 因此只在现场拍摄时出现，不显示"朝向未知"这类噪音。
+  @override
+  bool isAvailable(FieldContext ctx) => !ctx.isImport && ctx.capture.hasHeading;
+
+  @override
+  ResolvedField? resolve(FieldContext ctx) {
+    if (ctx.isImport || !ctx.capture.hasHeading) return null;
+    final text = HeadingPolicy.format(
+      ctx.capture.headingDegrees,
+      style: ctx.headingFormat,
+    );
+    if (text.isEmpty) return null;
+    final accuracy = ctx.capture.headingAccuracyDegrees;
+    // 精度差于 ±25° 时补一句提示：手机指南针在金属/车内环境下确实会偏，
+    // 与其让用户以为水印写错了，不如把不确定性摊开写清楚。
+    final caution = (accuracy != null && accuracy > 25) ? '（精度低）' : '';
+    return ResolvedField(
+      id: WatermarkFieldIds.heading,
+      label: '方位角',
+      text: '方位角 $text$caution',
+      priority: 25,
     );
   }
 }
@@ -520,6 +565,7 @@ List<WatermarkFieldProvider> builtinFieldProviders() => const [
       SourceBadgeFieldProvider(),
       TimeFieldProvider(),
       CoordsFieldProvider(),
+      HeadingFieldProvider(),
       AltitudeFieldProvider(),
       AddressFieldProvider(),
       WeatherFieldProvider(),

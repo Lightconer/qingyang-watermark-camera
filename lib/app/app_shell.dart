@@ -85,7 +85,12 @@ class _AppShellState extends State<AppShell> {
                   backgroundColor: Colors.black.withOpacity(0.35),
                   foregroundColor: Colors.white,
                 ),
-                onPressed: () => Navigator.of(context).pushNamed(AppRoutes.settings),
+                onPressed: () async {
+                  await Navigator.of(context).pushNamed(AppRoutes.settings);
+                  // 设置页里可能开关了方位角 / 换了写法，回来自检一次，
+                  // 避免"开了指南针但要重启才生效"。
+                  await _controller?.refreshCompass();
+                },
                 icon: const Icon(Icons.settings_outlined, size: 20),
               ),
             ),

@@ -92,6 +92,9 @@ cat > "$MANIFEST" <<'MANIFEST_EOF'
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <!-- 方位角是可选能力：没有磁力计/旋转矢量的设备照样装、照样拍，
+         只是水印不画方位角那一行（required=false 才不会在商店里被过滤掉）。 -->
+    <uses-feature android:name="android.hardware.sensor.compass" android:required="false" />
 
     <application
         android:label="青阳水印相机"
@@ -261,27 +264,51 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
 
 /**
- * 宿主 Activity：只做五件事
+ * 宿主 Activity：只做六件事
  * 1. 暴露设备型号与版本号（水印字段 / 远程更新的当前版本）；
  * 2. 接收 ACTION_SEND（image 类型）分享，把图片复制到缓存目录，供 Dart 侧导入；
  * 3. 把成品写入系统相册的独立相册（MediaStore）；
  * 4. 把下载好的更新包交给 PackageInstaller 安装；
- * 5. 保证单实例（singleTop），避免分享时重复启动。
+ * 5. 上报相机朝向（方位角），无传感器时明确回报不支持；
+ * 6. 保证单实例（singleTop），避免分享时重复启动。
  */
 class MainActivity : FlutterActivity() {
     private val sharedPaths = mutableListOf<String>()
+
+    // ---- 方位角（指南针）----
+    // 优先用 TYPE_ROTATION_VECTOR（厂商融合了磁力计 + 陀螺仪 + 加速度计），
+    // 它比裸磁力计稳、不需要用户"8 字校准"；没有融合传感器的老设备再退回
+    // 加速度计 + 磁力计的组合。
+    private val sensorManager by lazy {
+        getSystemService(SENSOR_SERVICE) as SensorManager
+    }
+    private var compassSink: EventChannel.EventSink? = null
+    private var compassListening = false
+    private var lastHeadingDegrees: Double? = null
+    private var lastHeadingAccuracy: Double? = null
+    private var lastCompassEmitAt = 0L
+    private var gravityValues: FloatArray? = null
+    private var magneticValues: FloatArray? = null
+    private val rotationMatrix = FloatArray(9)
+    private val orientationValues = FloatArray(3)
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -367,7 +394,156 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        registerCompassChannels(flutterEngine)
         handleIntent(intent)
+    }
+
+    /** 朝向通道：MethodChannel 负责能力探测与一次性读数，EventChannel 负责连续上报。 */
+    private fun registerCompassChannels(flutterEngine: FlutterEngine) {
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.qingyang.watermark/compass"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "hasCompass" -> result.success(hasCompassSensor())
+                "read" -> {
+                    // 已经有值就直接给；没有就先挂上监听，让 Dart 侧的流去等第一帧。
+                    if (lastHeadingDegrees == null) startCompassListening()
+                    result.success(lastHeadingPayload())
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.qingyang.watermark/compassStream"
+        ).setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                compassSink = events
+                startCompassListening()
+            }
+
+            override fun onCancel(arguments: Any?) {
+                compassSink = null
+                stopCompassListening()
+            }
+        })
+    }
+
+    private fun hasCompassSensor(): Boolean {
+        val rotation = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        if (rotation != null) return true
+        return sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null &&
+            sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD) != null
+    }
+
+    private fun startCompassListening() {
+        if (compassListening) return
+        val rotation = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        if (rotation != null) {
+            sensorManager.registerListener(compassListener, rotation, SensorManager.SENSOR_DELAY_UI)
+        } else {
+            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
+                sensorManager.registerListener(compassListener, it, SensorManager.SENSOR_DELAY_UI)
+            }
+            sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)?.let {
+                sensorManager.registerListener(compassListener, it, SensorManager.SENSOR_DELAY_UI)
+            }
+        }
+        compassListening = true
+    }
+
+    private fun stopCompassListening() {
+        if (!compassListening) return
+        sensorManager.unregisterListener(compassListener)
+        compassListening = false
+        gravityValues = null
+        magneticValues = null
+    }
+
+    private val compassListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            when (event.sensor.type) {
+                Sensor.TYPE_ROTATION_VECTOR -> {
+                    SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+                    SensorManager.getOrientation(rotationMatrix, orientationValues)
+                    emitHeading(
+                        Math.toDegrees(orientationValues[0].toDouble()),
+                        accuracyDegrees(event.accuracy)
+                    )
+                }
+                Sensor.TYPE_ACCELEROMETER -> {
+                    gravityValues = lowPass(event.values.clone(), gravityValues)
+                    emitFromAccelAndMag()
+                }
+                Sensor.TYPE_MAGNETIC_FIELD -> {
+                    magneticValues = lowPass(event.values.clone(), magneticValues)
+                    emitFromAccelAndMag()
+                }
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
+
+    /** 低通滤波：手机在手里是会抖的，原始磁场读数直接上屏会变成"乱跳的罗盘"。 */
+    private fun lowPass(input: FloatArray, output: FloatArray?): FloatArray {
+        if (output == null) return input.copyOf()
+        val alpha = 0.15f
+        for (index in input.indices) {
+            output[index] += alpha * (input[index] - output[index])
+        }
+        return output
+    }
+
+    private fun emitFromAccelAndMag() {
+        val gravity = gravityValues ?: return
+        val magnetic = magneticValues ?: return
+        if (!SensorManager.getRotationMatrix(rotationMatrix, null, gravity, magnetic)) return
+        SensorManager.getOrientation(rotationMatrix, orientationValues)
+        emitHeading(Math.toDegrees(orientationValues[0].toDouble()), lastHeadingAccuracy)
+    }
+
+    /**
+     * 上报朝向。传感器 50Hz 上报全部塞给 Dart 会拖垮预览帧率，
+     * 这里做两级节流：至少间隔 120ms，且变化不足 1 度不重复发。
+     */
+    private fun emitHeading(degrees: Double, accuracy: Double?) {
+        var normalized = degrees % 360.0
+        if (normalized < 0) normalized += 360.0
+        val previous = lastHeadingDegrees
+        val delta = if (previous == null) 360.0 else {
+            val raw = Math.abs(normalized - previous)
+            Math.min(raw, 360.0 - raw)
+        }
+        val now = SystemClock.elapsedRealtime()
+        lastHeadingAccuracy = accuracy
+        if (previous != null && now - lastCompassEmitAt < 120 && delta < 1.0) return
+        lastCompassEmitAt = now
+        lastHeadingDegrees = normalized
+        compassSink?.success(lastHeadingPayload())
+    }
+
+    private fun lastHeadingPayload(): Map<String, Any>? {
+        val degrees = lastHeadingDegrees ?: return null
+        val payload = HashMap<String, Any>()
+        payload["degrees"] = degrees
+        lastHeadingAccuracy?.let { payload["accuracy"] = it }
+        return payload
+    }
+
+    /** 传感器精度等级换算成度数：HIGH 约正负 5 度。 */
+    private fun accuracyDegrees(status: Int): Double? = when (status) {
+        SensorManager.SENSOR_STATUS_ACCURACY_HIGH -> 5.0
+        SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM -> 15.0
+        SensorManager.SENSOR_STATUS_ACCURACY_LOW -> 30.0
+        else -> 45.0
+    }
+
+    override fun onDestroy() {
+        stopCompassListening()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -519,7 +695,7 @@ class MainActivity : FlutterActivity() {
     }
 }
 KOTLIN_EOF
-echo "[bootstrap] MainActivity.kt 已写入（设备型号 / 版本号 / ACTION_SEND / 相册写入 / 安装）"
+echo "[bootstrap] MainActivity.kt 已写入（设备型号 / 版本号 / ACTION_SEND / 相册写入 / 安装 / 方位角）"
 
 cat > "$KOTLIN_DIR/InstallResultReceiver.kt" <<'RECEIVER_EOF'
 package com.qingyang.watermark

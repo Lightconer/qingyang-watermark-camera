@@ -16,8 +16,10 @@ import '../../core/models/types.dart';
 import '../../engines/image/pipeline.dart';
 import '../../engines/location/location_engine.dart';
 import '../../engines/media/gallery_export_engine.dart';
+import '../../engines/sensor/compass_engine.dart';
 import '../../engines/storage/ledger_store.dart';
 import '../../engines/storage/storage_engine.dart';
+import '../../core/policy/heading.dart';
 
 /// 设备型号：优先问原生侧，取不到就用系统版本摘要，绝不空着。
 class DeviceInfo {
@@ -64,8 +66,15 @@ class CaptureController extends ChangeNotifier {
   double _zoom = 1;
   double _maxZoom = 1;
   bool _flashOn = false;
+  bool _flashAvailable = true;
   bool _gridOn = true;
   bool _weatherLoading = false;
+  String? _errorHint;
+
+  // ---- 朝向 ----
+  CompassReading? _heading;
+  bool _compassSupported = false;
+  StreamSubscription<CompassReading>? _compassSub;
 
   StreamSubscription<LocationFix>? _locationSub;
   Timer? _ntpTimer;
@@ -75,6 +84,9 @@ class CaptureController extends ChangeNotifier {
   bool get busy => _busy;
   bool get recording => _recording;
   String? get error => _error;
+
+  /// 相机失败时的处置建议（缺权限 / 被别的应用占用 / 无摄像头）。
+  String? get errorHint => _errorHint;
   String get status => _status;
 
   /// 最近一次相册写入结果：拍摄页据此提示"已存入相册 / 缺权限"，不做硬失败。
@@ -88,8 +100,27 @@ class CaptureController extends ChangeNotifier {
   double get zoom => _zoom;
   double get maxZoom => _maxZoom;
   bool get flashOn => _flashOn;
+
+  /// 当前摄像头是否有可用闪光灯（前置摄像头通常没有）。
+  bool get flashAvailable => _flashAvailable;
+  bool get canSwitchCamera => _cameras.length > 1;
   bool get gridOn => _gridOn;
   bool get weatherLoading => _weatherLoading;
+
+  /// 设备是否具备方向传感器。
+  bool get compassSupported => _compassSupported;
+
+  /// 屏幕上展示的朝向文案；无传感器或未开启时为 null（不显示，不编造）。
+  String? get headingLabel {
+    if (!services.settings.compassEnabled) return null;
+    final reading = _heading;
+    if (reading == null || !reading.isValid) return null;
+    final text = HeadingPolicy.format(
+      reading.degrees,
+      style: services.settings.headingFormat,
+    );
+    return text.isEmpty ? null : text;
+  }
 
   TemplateConfig get template => services.templates.byId(services.settings.lastTemplateId);
   ProfileConfig get profile => services.profiles.byId(template.profileId);
@@ -97,11 +128,14 @@ class CaptureController extends ChangeNotifier {
   Future<void> initialize() async {
     if (_initializing) return;
     _initializing = true;
+    _error = null;
+    _errorHint = null;
     notifyListeners();
     try {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
         _error = '未检测到可用摄像头';
+        _errorHint = '这台设备没有上报任何摄像头；模拟器请先配置虚拟摄像头。';
         return;
       }
       _cameraIndex = _cameras.indexWhere(
@@ -111,13 +145,36 @@ class CaptureController extends ChangeNotifier {
       await _bindCamera(_cameras[_cameraIndex]);
       unawaited(_startLocation());
       unawaited(_syncTime());
+      unawaited(_startCompass());
       _ntpTimer = Timer.periodic(const Duration(minutes: 5), (_) => _syncTime());
       _status = '预览已就绪';
     } catch (error) {
-      _error = '相机初始化失败：$error';
+      _classifyCameraError(error);
     } finally {
       _initializing = false;
       notifyListeners();
+    }
+  }
+
+  /// 相机初始化失败的原因分类。
+  ///
+  /// 各厂商抛出的异常文案不统一，"相机初始化失败：xxx"这种原文对人没用；
+  /// 这里翻译成"接下来该做什么"，并给一条可执行的建议。
+  void _classifyCameraError(Object error) {
+    final raw = '$error';
+    final lower = raw.toLowerCase();
+    if (lower.contains('permission') || lower.contains('denied')) {
+      _error = '未获得相机权限';
+      _errorHint = '到系统设置 → 应用 → ${AppIdentity.appName} → 权限，打开「相机」后重试。';
+    } else if (lower.contains('in use') || lower.contains('occupied')) {
+      _error = '摄像头被其他应用占用';
+      _errorHint = '关掉正在使用相机的应用（视频通话、扫码、其他相机）后点重试。';
+    } else if (lower.contains('no camera') || lower.contains('not found')) {
+      _error = '没有找到可用摄像头';
+      _errorHint = '请确认设备摄像头未被系统禁用。';
+    } else {
+      _error = '相机初始化失败：$raw';
+      _errorHint = '可尝试退出重进；若持续失败，把这段提示反馈给我们。';
     }
   }
 
@@ -131,8 +188,20 @@ class CaptureController extends ChangeNotifier {
     await controller.initialize();
     _camera = controller;
     await previous?.dispose();
+    // 只有后置摄像头通常带闪光灯；前置/外接摄像头上把按钮置灰，
+    // 比"点了没反应"更诚实。
+    _flashAvailable = description.lensDirection == CameraLensDirection.back;
+    _flashOn = false;
+    // 闪光灯与变焦分开 try：有些机型只拒绝其中一项，
+    // 合在一起会把"能变焦但闪光灯不可用"的设备误判成不支持变焦。
+    if (_flashAvailable) {
+      try {
+        await controller.setFlashMode(FlashMode.off);
+      } catch (_) {
+        _flashAvailable = false;
+      }
+    }
     try {
-      await controller.setFlashMode(FlashMode.off);
       await controller.setZoomLevel(1);
       // 缩放上限由平台上报（0.11 起改为异步查询），失败按 1x 处理即禁用缩放条。
       _maxZoom = await controller.getMaxZoomLevel();
@@ -155,12 +224,16 @@ class CaptureController extends ChangeNotifier {
 
   Future<void> toggleFlash() async {
     final controller = _camera;
+    if (!_flashAvailable) return;
     if (controller == null || !controller.value.isInitialized) return;
     _flashOn = !_flashOn;
     try {
       await controller.setFlashMode(_flashOn ? FlashMode.torch : FlashMode.off);
     } catch (_) {
+      // 该设备声称有闪光灯但拒绝切换到常亮（部分机型只允许拍照瞬间闪光）：
+      // 保持"关"，并把按钮降级为不可用，避免反复误触。
       _flashOn = false;
+      _flashAvailable = false;
     }
     notifyListeners();
   }
@@ -192,6 +265,50 @@ class CaptureController extends ChangeNotifier {
     final result = await services.time.sync();
     _online = result != null;
     notifyListeners();
+  }
+
+  /// 启动朝向采集。
+  ///
+  /// 传感器不是拍摄的必要条件：取不到就一直保持"朝向未知"，
+  /// 水印不画方位角这一行，绝不用 0° 顶替。
+  Future<void> _startCompass() async {
+    if (!services.settings.compassEnabled) {
+      _compassSupported = false;
+      notifyListeners();
+      return;
+    }
+    final supported = await services.compass.probe();
+    _compassSupported = supported;
+    if (!supported) {
+      _heading = null;
+      notifyListeners();
+      return;
+    }
+    // 先取一次静态值，避免订阅到第一帧读数之前水印缺行。
+    final immediate = await services.compass.read();
+    if (immediate != null) {
+      _heading = immediate;
+      notifyListeners();
+    }
+    await _compassSub?.cancel();
+    _compassSub = services.compass.stream.listen(
+      (reading) {
+        _heading = reading;
+        notifyListeners();
+      },
+      onError: (_) {
+        _compassSupported = false;
+        notifyListeners();
+      },
+    );
+  }
+
+  /// 设置里开关朝向后即时生效，不必重启应用。
+  Future<void> refreshCompass() async {
+    await _compassSub?.cancel();
+    _compassSub = null;
+    _heading = null;
+    await _startCompass();
   }
 
   Future<void> _startLocation() async {
@@ -254,13 +371,17 @@ class CaptureController extends ChangeNotifier {
 
   WeatherSnapshot? _weather;
 
-  /// 快门瞬间冻结上下文：时间、坐标、地址、天气一次锁定，之后不再变化。
+  /// 快门瞬间冻结上下文：时间、坐标、地址、天气、朝向一次锁定，之后不再变化。
+  ///
+  /// 朝向也要冻结：用户按下快门后再转身，不能让水印上的方位角跟着变，
+  /// 否则照片方向和画面的实际朝向对不上，取证就失效了。
   CaptureContext freezeContext() {
     final now = services.time.now();
     final authority = services.settings.ntpEnabled && now.authority == TimeAuthority.ntp
         ? TimeAuthority.ntp
         : TimeAuthority.system;
     final fix = _fix;
+    final heading = services.settings.compassEnabled ? _heading : null;
     return CaptureContext(
       capturedAt: now.time,
       timeAuthority: authority,
@@ -274,6 +395,11 @@ class CaptureController extends ChangeNotifier {
       deviceModel: null,
       online: _online,
       ntpOffsetMs: now.offsetMs,
+      headingDegrees: heading?.degrees,
+      headingAccuracyDegrees: heading?.accuracyDegrees,
+      headingAuthority: heading == null
+          ? HeadingAuthority.missing
+          : HeadingAuthority.sensor,
     );
   }
 
@@ -311,6 +437,9 @@ class CaptureController extends ChangeNotifier {
         deviceModel: deviceModel,
         online: context.online,
         ntpOffsetMs: context.ntpOffsetMs,
+        headingDegrees: context.headingDegrees,
+        headingAccuracyDegrees: context.headingAccuracyDegrees,
+        headingAuthority: context.headingAuthority,
       );
 
       final outputPath = await services.storage.outputPath(
@@ -328,7 +457,10 @@ class CaptureController extends ChangeNotifier {
         capture: frozen,
         provenance: Provenance.capture(batchId: batchId, at: frozen.capturedAt),
         identity: services.settings.identity,
-        options: {'jpegQuality': services.settings.jpegQuality},
+        options: {
+          'jpegQuality': services.settings.jpegQuality,
+          'headingFormat': services.settings.headingFormat.code,
+        },
       );
 
       _status = '正在绘制水印…';
@@ -470,12 +602,22 @@ class CaptureController extends ChangeNotifier {
     if (_address == null && services.settings.geocodeEnabled) {
       result.add('地址未解析：画面上不显示地址');
     }
+    // 传感器缺失必须说清楚，否则用户会以为"方位角字段坏了"。
+    if (services.settings.compassEnabled && !_compassSupported) {
+      result.add('此设备无方向传感器：水印不显示方位角');
+    }
+    if (services.settings.compassEnabled &&
+        _compassSupported &&
+        _heading == null) {
+      result.add('正在获取朝向：拿到读数后自动显示方位角');
+    }
     return result;
   }
 
   @override
   void dispose() {
     _locationSub?.cancel();
+    _compassSub?.cancel();
     _ntpTimer?.cancel();
     _camera?.dispose();
     super.dispose();

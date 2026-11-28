@@ -130,9 +130,10 @@ class _TemplatePageState extends State<TemplatePage> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: SegmentedButton<WatermarkPosition>(
               segments: const [
-                ButtonSegment(value: WatermarkPosition.bottomBar, label: Text('通栏')),
+                ButtonSegment(value: WatermarkPosition.bottomBar, label: Text('底部')),
                 ButtonSegment(value: WatermarkPosition.bottomLeft, label: Text('左下')),
                 ButtonSegment(value: WatermarkPosition.bottomRight, label: Text('右下')),
+                ButtonSegment(value: WatermarkPosition.topBar, label: Text('顶部')),
               ],
               selected: {_draft.style.position},
               onSelectionChanged: (value) => _update(
@@ -378,6 +379,10 @@ class _TemplatePreviewPainter extends CustomPainter {
       weather: WeatherSnapshot(temperatureC: 18, text: '多云', fetchedAt: now),
       deviceModel: 'Sample Device',
       online: true,
+      // 模板预览要能看出方位角这一行长什么样，用固定示例值而不是真实传感器。
+      headingDegrees: 42,
+      headingAccuracyDegrees: 3,
+      headingAuthority: HeadingAuthority.sensor,
     );
     final fieldContext = FieldContext(
       mode: profile.mode,
@@ -387,6 +392,7 @@ class _TemplatePreviewPainter extends CustomPainter {
       identity: services.settings.identity,
       fingerprint: 'a3f5c9d1e7b24680a3f5c9d1e7b24680',
       weatherAllowed: profile.weatherAllowed,
+      headingFormat: services.settings.headingFormat,
     );
     final fields = services.fields.resolve(
       fieldContext,

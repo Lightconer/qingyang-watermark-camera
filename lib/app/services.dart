@@ -13,6 +13,7 @@ import '../engines/location/location_engine.dart';
 import '../engines/media/gallery_export_engine.dart';
 import '../engines/media/media_gateway.dart';
 import '../engines/metadata/metadata_engine.dart';
+import '../engines/sensor/compass_engine.dart';
 import '../engines/storage/settings_store.dart';
 import '../engines/storage/storage_engine.dart';
 import '../engines/storage/template_store.dart';
@@ -39,6 +40,7 @@ class AppServices {
     required this.media,
     required this.gallery,
     required this.update,
+    required this.compass,
     required this.profiles,
     required this.templates,
     required this.registry,
@@ -62,6 +64,9 @@ class AppServices {
 
   /// 远程更新：查 GitHub Releases → 下载 → 校验 → 交给系统安装器。
   final UpdateService update;
+
+  /// 方位角来源：旋转矢量/磁力计（原生通道），无传感器时优雅降级。
+  final CompassEngine compass;
   final ProfileRegistry profiles;
   final TemplateStore templates;
   final FeatureRegistry registry;
@@ -100,6 +105,7 @@ class AppServices {
   Future<void> dispose() async {
     settings.dispose();
     templates.dispose();
+    await compass.dispose();
   }
 }
 

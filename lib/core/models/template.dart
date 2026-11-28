@@ -1,7 +1,7 @@
 import 'types.dart';
 
 /// 水印位置。
-enum WatermarkPosition { bottomBar, bottomLeft, bottomRight }
+enum WatermarkPosition { bottomBar, bottomLeft, bottomRight, topBar }
 
 extension WatermarkPositionX on WatermarkPosition {
   String get label {
@@ -12,8 +12,16 @@ extension WatermarkPositionX on WatermarkPosition {
         return '左下角';
       case WatermarkPosition.bottomRight:
         return '右下角';
+      case WatermarkPosition.topBar:
+        return '顶部通栏';
     }
   }
+
+  /// 通栏（铺满整宽）与浮块（贴着某一角）的区别：角标与二维码的落位规则不同。
+  bool get isFullWidth => this == WatermarkPosition.bottomBar || this == WatermarkPosition.topBar;
+
+  /// 水印块是否贴在画面顶部。
+  bool get isTop => this == WatermarkPosition.topBar;
 
   static WatermarkPosition fromCode(String? code) {
     for (final value in WatermarkPosition.values) {
@@ -29,6 +37,7 @@ class WatermarkFieldIds {
 
   static const String time = 'time';
   static const String coords = 'coords';
+  static const String heading = 'heading';
   static const String altitude = 'altitude';
   static const String address = 'address';
   static const String weather = 'weather';
@@ -45,6 +54,7 @@ class WatermarkFieldIds {
   static const List<String> all = [
     time,
     coords,
+    heading,
     altitude,
     address,
     weather,

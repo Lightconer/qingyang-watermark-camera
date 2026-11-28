@@ -325,3 +325,72 @@ abstract class FeatureModule {
   重签；未配置 `KEYSTORE_BASE64` 时脚本跳过重签，产物保持调试签名（可安装、不适合分发）。
 * **版本号来源唯一**：`release.yml` 用标签版本号作 `--build-name`、流水线序号作
   `--build-number`，产物名 `qingyang-watermark-vX.Y.Z.apk` 与 `SHA256SUMS.txt` 一并发布。
+
+---
+
+## 10. 设备与机型适配（v1.3.0）
+
+现场拍照类应用最容易被投诉的不是功能少，而是"在我这台机器上不对"。这一节记录三类
+差异的收敛方式。
+
+### 10.1 预览与成片的画幅对齐（`core/layout/frame_fit.dart`）
+
+问题：取景框尺寸由**屏幕**决定（19.5:9 / 20:9 / 平板 4:3），成片尺寸由**传感器**决定
+（通常 4:3）。如果水印按"屏幕尺寸"排版，同一套模板在不同手机上位置和字号都会不同，
+预览与成片也对不上。
+
+做法：
+
+1. 水印排版永远使用**成片坐标系**（`LayoutEngine.compute(size: fit.photo)`）；
+2. `FrameFit` 计算成片在取景框里的落位（`contain` 或 `cover`），并提供 `toBox`/`toPhoto`
+   双向映射；
+3. 预览层 `canvas.translate/fit.scale` 后按成片坐标绘制，`LayoutEngine` 不需要知道屏幕多大。
+
+`FrameFit` 是纯 Dart（只依赖 `LayoutSize`/`LayoutRect`），所以能在单测里覆盖留边、
+裁切、坐标互转与零尺寸退化，不必上真机。
+
+### 10.2 取景模式：留边 / 铺满
+
+`settings.previewFill` 控制：
+
+| 模式 | 几何 | 适用场景 | 代价 |
+| --- | --- | --- | --- |
+| 留边（默认，`contain`） | 取景框按照片比例居中，四周用渐变底填充 | 取证、验收——屏幕上看到的范围就是成片范围 | 屏占比低一些 |
+| 铺满（`cover`） | 取景框被照片填满，边缘裁掉 | 打卡、宣传——画面更饱满 | 成片边缘比预览多一点 |
+
+两种模式下**水印位置都以成片为准**，所以铺满时如果水印落在被裁掉的边缘，预览里看到的
+位置就是它在成片里的位置——不会出现"预览里有、成片里偏了"。
+
+### 10.3 方位角（`core/policy/heading.dart` + `engines/sensor/compass_engine.dart`）
+
+* 传感器走原生 `SensorManager`：优先 `TYPE_ROTATION_VECTOR`（厂商融合，免"8 字校准"），
+  老设备退回加速度计 + 磁力计；两者都没有时 `hasCompass` 直接返回 false。
+* 通信分两条通道：`MethodChannel .../compass`（`hasCompass` / `read`）负责探测与一次性读数，
+  `EventChannel .../compassStream` 负责连续上报。
+* 原生侧做两级节流（≥120ms 且变化 ≥1°），避免 50Hz 传感器事件把预览帧率拖下去。
+* 文案口径收在 `HeadingPolicy`：`八方位` / `十六方位` / `仅角度`，纯函数可单测。
+* **降级原则**：没有传感器 → `heading` 字段 `isAvailable` 为 false，整行不绘制；
+  绝不按 0°（正北）或上一次读数编造。传感器精度差于 ±25° 时补「（精度低）」。
+* 朝向在**快门瞬间冻结**，与时间、坐标一样进入 `CaptureContext`，转身不会改变水印。
+
+### 10.4 设备能力探测与按钮降级
+
+| 能力 | 探测方式 | 不可用时 |
+| --- | --- | --- |
+| 闪光灯 | 仅后置摄像头视为可用；`setFlashMode` 抛错则永久降级 | 按钮置灰 + tooltip「此摄像头无闪光灯」 |
+| 变焦 | `getMaxZoomLevel()`，异常按 1x | 滑条换成「此设备不支持变焦」文案 |
+| 多摄像头 | `availableCameras().length` | 切换按钮置灰 |
+| 指南针 | 原生 `hasCompass` | 状态栏显示「无指南针」，字段不绘制 |
+
+相机初始化失败按原因分类给出处置建议（缺权限 / 被占用 / 无摄像头），而不是把
+插件抛出的英文原文丢给用户。
+
+### 10.5 水印位置与角标
+
+`WatermarkPosition` 四种：`bottomBar` / `bottomLeft` / `bottomRight` / `topBar`。
+
+角标（现场拍摄 / 导入 · 非现场取证）的落位规则：
+
+* 通栏：角标在底板内右上角，且其宽度**先**从可用文本宽度里扣掉，长文本不会压到角标底下；
+* 浮块：角标移到底板**外侧上方**，与底板同侧对齐，不覆盖第一行文字。
+

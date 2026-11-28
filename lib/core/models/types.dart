@@ -12,7 +12,7 @@ class AppIdentity {
 
   /// 编译期版本兜底：优先用系统 `versionName`，原生取不到时才用它。
   /// 发版时与 `pubspec.yaml` 的 version 一起改。
-  static const String version = '1.2.1';
+  static const String version = '1.3.0';
 
   /// 默认更新源（与 release.yml 发布的仓库一致），设置页可改成分叉仓库。
   static const String updateRepo = 'Lightconer/qingyang-watermark-camera';
@@ -140,6 +140,31 @@ extension CoordAuthorityX on CoordAuthority {
       this == CoordAuthority.originalExif;
 }
 
+/// 方位角（相机朝向）的权威来源。
+///
+/// 只认设备传感器：无磁力计/旋转矢量的设备必须标注为 [missing]，
+/// 绝不按 0° 或"上一次朝向"编造。
+enum HeadingAuthority {
+  /// 旋转矢量 / 磁力计融合（设备传感器给出，磁北口径）。
+  sensor,
+
+  /// 无传感器或尚未读到有效值。
+  missing,
+}
+
+extension HeadingAuthorityX on HeadingAuthority {
+  String get label {
+    switch (this) {
+      case HeadingAuthority.sensor:
+        return '设备传感器';
+      case HeadingAuthority.missing:
+        return '朝向未知';
+    }
+  }
+
+  bool get hasHeading => this == HeadingAuthority.sensor;
+}
+
 /// WGS84 经纬度。
 class GeoPoint {
   const GeoPoint({required this.latitude, required this.longitude});
@@ -242,6 +267,9 @@ class CaptureContext {
     this.deviceModel,
     this.online = false,
     this.ntpOffsetMs,
+    this.headingDegrees,
+    this.headingAccuracyDegrees,
+    this.headingAuthority = HeadingAuthority.missing,
   });
 
   factory CaptureContext.empty() => CaptureContext(
@@ -261,8 +289,21 @@ class CaptureContext {
   final bool online;
   final int? ntpOffsetMs;
 
+  /// 快门瞬间的相机朝向（0=正北，顺时针）。无传感器时为 null。
+  final double? headingDegrees;
+
+  /// 传感器上报的精度（度）。部分设备不上报，保持 null。
+  final double? headingAccuracyDegrees;
+  final HeadingAuthority headingAuthority;
+
   bool get hasTrustedTime => timeAuthority.isTrusted;
   bool get hasPosition => position != null && position!.isValid;
+
+  /// 朝向可用的严格判定：既要来源可信，也要角度合法。
+  bool get hasHeading =>
+      headingAuthority.hasHeading &&
+      headingDegrees != null &&
+      headingDegrees!.isFinite;
 
   /// 离线采集标记：无网络时坐标只有 GPS 原始值，时间只能用系统时间。
   bool get isOfflineCapture => !online;
@@ -278,6 +319,9 @@ class CaptureContext {
     String? deviceModel,
     bool? online,
     int? ntpOffsetMs,
+    double? headingDegrees,
+    double? headingAccuracyDegrees,
+    HeadingAuthority? headingAuthority,
   }) {
     return CaptureContext(
       capturedAt: capturedAt ?? this.capturedAt,
@@ -290,6 +334,10 @@ class CaptureContext {
       deviceModel: deviceModel ?? this.deviceModel,
       online: online ?? this.online,
       ntpOffsetMs: ntpOffsetMs ?? this.ntpOffsetMs,
+      headingDegrees: headingDegrees ?? this.headingDegrees,
+      headingAccuracyDegrees:
+          headingAccuracyDegrees ?? this.headingAccuracyDegrees,
+      headingAuthority: headingAuthority ?? this.headingAuthority,
     );
   }
 
@@ -304,6 +352,9 @@ class CaptureContext {
         'deviceModel': deviceModel,
         'online': online,
         'ntpOffsetMs': ntpOffsetMs,
+        'headingDegrees': headingDegrees,
+        'headingAccuracyDegrees': headingAccuracyDegrees,
+        'headingAuthority': headingAuthority.name,
       };
 
   static CaptureContext fromJson(Map<String, dynamic> json) {
@@ -322,6 +373,12 @@ class CaptureContext {
       deviceModel: json['deviceModel'] as String?,
       online: json['online'] == true,
       ntpOffsetMs: (json['ntpOffsetMs'] as num?)?.toInt(),
+      headingDegrees: (json['headingDegrees'] as num?)?.toDouble(),
+      headingAccuracyDegrees:
+          (json['headingAccuracyDegrees'] as num?)?.toDouble(),
+      headingAuthority:
+          _enumByName(HeadingAuthority.values, json['headingAuthority']) ??
+              HeadingAuthority.missing,
     );
   }
 }

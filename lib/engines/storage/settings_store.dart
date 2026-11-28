@@ -5,6 +5,7 @@ import '../../core/extensions/watermark_field_provider.dart';
 import '../../core/models/template.dart';
 import '../../core/models/types.dart';
 import '../../core/policy/album_policy.dart';
+import '../../core/policy/heading.dart';
 
 /// 设置存储：所有开关、密钥、默认模板、输出路径、台账配置集中在这里。
 ///
@@ -111,6 +112,29 @@ class SettingsStore extends ChangeNotifier {
 
   Future<void> setLatestKnownVersion(String tag) async {
     await _prefs.setString('update.latest', tag.trim());
+    notifyListeners();
+  }
+
+  // ---- 传感器与取景 ----
+  /// 是否采集方位角。关闭后不注册传感器监听（省电，元道同类功能都是可关的）。
+  bool get compassEnabled => _prefs.getBool('sensor.compass') ?? true;
+
+  /// 方位角展示口径。
+  HeadingFormat get headingFormat =>
+      HeadingFormatX.fromCode(_prefs.getString('sensor.headingFormat'));
+
+  /// 取景框是否铺满屏幕（true=裁切铺满，false=按照片比例留边）。
+  ///
+  /// 铺满更好看，但边缘会被裁掉；留边能保证"屏幕上看到的就是成片"。
+  /// 两种都要支持，因为不同行业要求不同：取证要所见即所得，打卡要画面饱满。
+  bool get previewFill => _prefs.getBool('camera.previewFill') ?? false;
+
+  Future<void> setCompassEnabled(bool value) => _setBool('sensor.compass', value);
+
+  Future<void> setPreviewFill(bool value) => _setBool('camera.previewFill', value);
+
+  Future<void> setHeadingFormat(HeadingFormat value) async {
+    await _prefs.setString('sensor.headingFormat', value.code);
     notifyListeners();
   }
 

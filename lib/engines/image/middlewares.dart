@@ -8,6 +8,7 @@ import '../../core/models/photo_metadata.dart';
 import '../../core/models/pipeline_job.dart';
 import '../../core/models/template.dart';
 import '../../core/models/types.dart';
+import '../../core/policy/heading.dart';
 import 'image_codec.dart';
 import 'pipeline.dart';
 
@@ -270,6 +271,10 @@ class DrawWatermarkMiddleware implements ImageMiddleware {
           identity: job.identity,
           fingerprint: fingerprint,
           weatherAllowed: job.weatherAllowed,
+          // 方位角口径由调用方（拍摄/导入控制器）按设置页的选择传进来，
+          // 渲染层不读设置，保证同一份 job 在任意环境重放结果一致。
+          headingFormat:
+              HeadingFormatX.fromCode(job.options['headingFormat'] as String?),
         );
 
     List<ResolvedField> resolve(FieldContext context) => ctx.fields.resolve(
