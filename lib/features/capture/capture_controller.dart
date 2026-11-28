@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
 
 import '../../app/services.dart';
@@ -44,8 +44,12 @@ class DeviceInfo {
 }
 
 /// 拍摄链路控制器：预览、冻结上下文、出图、落盘、写台账。
-class CaptureController extends ChangeNotifier {
-  CaptureController({required this.services});
+class CaptureController extends ChangeNotifier with WidgetsBindingObserver {
+  CaptureController({required this.services}) {
+    // 监听前后台切换：相机预览流是这台机器上最贵的一块内存（1080p 纹理 +
+    // 厂商图像管线缓冲），退到后台还挂着既费电又容易被系统判定为内存大户。
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   final AppServices services;
 
@@ -55,6 +59,9 @@ class CaptureController extends ChangeNotifier {
   bool _initializing = false;
   bool _busy = false;
   bool _recording = false;
+
+  /// 退到后台后为 true：相机与传感器都已释放，回前台需要重新装配。
+  bool _suspended = false;
   String? _error;
   String _status = '准备就绪';
 
@@ -128,6 +135,7 @@ class CaptureController extends ChangeNotifier {
   Future<void> initialize() async {
     if (_initializing) return;
     _initializing = true;
+    _suspended = false;
     _error = null;
     _errorHint = null;
     notifyListeners();
@@ -615,7 +623,82 @@ class CaptureController extends ChangeNotifier {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.paused:
+        // 正在出片/录像时不打断：释放相机等于把用户这一张丢掉。
+        if (_busy || _recording) return;
+        unawaited(_releaseForBackground());
+      case AppLifecycleState.resumed:
+        if (!_suspended) return;
+        unawaited(_resumeFromBackground());
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        // inactive 在拉系统权限框、下拉通知栏时也会触发；
+        // 在这上面释放相机会导致预览频繁闪黑，只在真正 paused 时动手。
+        break;
+    }
+  }
+
+  /// 退到后台：放掉相机纹理、定位、指南针、授时轮询。
+  ///
+  /// 这几样加起来是常驻开销的大头：预览流持续占着 GPU 纹理与厂商 ISP 缓冲，
+  /// GPS 让定位芯片无法休眠，磁力计以几十 Hz 上报。后台没人看，全部收掉。
+  Future<void> _releaseForBackground() async {
+    if (_suspended) return;
+    // 正在初始化时不动手：并发 dispose 会让 initialize 里的 await 抛错，
+    // 结果是回前台后相机再也起不来。等它初始化完，下次进后台再释放。
+    if (_initializing) return;
+    _suspended = true;
+
+    _locationSub?.cancel();
+    _locationSub = null;
+    _compassSub?.cancel();
+    _compassSub = null;
+    _ntpTimer?.cancel();
+    _ntpTimer = null;
+
+    final camera = _camera;
+    _camera = null;
+    _status = '已暂停';
+    notifyListeners();
+
+    try {
+      await camera?.dispose();
+    } catch (_) {
+      // 个别机型在后台 dispose 会抛异常，忽略即可（对象已置空）
+    }
+  }
+
+  /// 回到前台：把刚才收掉的东西按原样装回去。
+  Future<void> _resumeFromBackground() async {
+    if (!_suspended) return;
+    _suspended = false;
+
+    if (_cameras.isEmpty) {
+      // 还没成功初始化过（例如首次启动就切了后台）：走完整流程。
+      await initialize();
+      return;
+    }
+
+    try {
+      await _bindCamera(_cameras[_cameraIndex]);
+      unawaited(_startLocation());
+      unawaited(_syncTime());
+      unawaited(_startCompass());
+      _ntpTimer = Timer.periodic(const Duration(minutes: 5), (_) => _syncTime());
+      _status = '预览已就绪';
+    } catch (error) {
+      _classifyCameraError(error);
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _locationSub?.cancel();
     _compassSub?.cancel();
     _ntpTimer?.cancel();

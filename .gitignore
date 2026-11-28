@@ -29,3 +29,9 @@ secrets/
 *.apk
 *.aab
 output/
+dist/
+build/symbols/
+
+# Python 工具缓存（scripts/verify_apk.py）
+__pycache__/
+*.pyc

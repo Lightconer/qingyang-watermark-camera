@@ -12,7 +12,7 @@ class AppIdentity {
 
   /// 编译期版本兜底：优先用系统 `versionName`，原生取不到时才用它。
   /// 发版时与 `pubspec.yaml` 的 version 一起改。
-  static const String version = '1.3.0';
+  static const String version = '1.4.0';
 
   /// 默认更新源（与 release.yml 发布的仓库一致），设置页可改成分叉仓库。
   static const String updateRepo = 'Lightconer/qingyang-watermark-camera';

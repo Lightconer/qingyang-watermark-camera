@@ -318,22 +318,98 @@ abstract class FeatureModule {
 | `Cannot run Project.afterEvaluate(Closure) when the project is already evaluated` | `evaluationDependsOn(":app")` 会立即评估工程，之后再对同一工程注册 `afterEvaluate` 会抛错 | compileSdk 覆盖块必须排在 `evaluationDependsOn(":app")` **之前** |
 | `:camera_android_camerax:lintVitalAnalyzeRelease` 崩溃（`java.util.List.removeLast`） | lint 的 `CommentDetector` 在 CI 的 JDK/AGP 组合下的自身 bug | 关闭所有 `lintVital*` 任务；构建门禁在 Dart 侧（`flutter analyze` + `flutter test`） |
 | `:app:compileReleaseKotlin` → `Unclosed comment` | Kotlin 支持**嵌套**块注释，`MainActivity.kt` 的 KDoc 里写了 `image/*`，等于又开了一层 `/*` | Kotlin 注释正文里不要出现 `/*`，改写成「ACTION_SEND（image 类型）」 |
+| 用户报「解析包时出现问题」，而我们这边构建全绿 | 三个成因：包下载被截断（54 MB universal 包在国内网络极易断）、只带 v3 签名缺 v1、native 库只按 4 KB 对齐而新机是 16 KB 页 | 见第 10 节：分 ABI 拆包瘦身 + 签名 v1/v2/v3 全开 + `zipalign -P 16` + 发布前结构体检 |
 
 另外两条约定：
 
 * **签名只有一条链路**：Gradle 侧一律用默认调试签名，产物在构建末尾由 `scripts/sign_apk.sh`
-  重签；未配置 `KEYSTORE_BASE64` 时脚本跳过重签，产物保持调试签名（可安装、不适合分发）。
+  重签；未配置 `KEYSTORE_BASE64` 时脚本跳过重签并直接复制产物（会告警，但构建不中断）。
 * **版本号来源唯一**：`release.yml` 用标签版本号作 `--build-name`、流水线序号作
-  `--build-number`，产物名 `qingyang-watermark-vX.Y.Z.apk` 与 `SHA256SUMS.txt` 一并发布。
+  `--build-number`，产物名 `qingyang-watermark-vX.Y.Z-<abi>.apk` 与 `SHA256SUMS.txt` 一并发布。
 
 ---
 
-## 10. 设备与机型适配（v1.3.0）
+## 10. 安装包体积与安装成功率（v1.4.0）
+
+「解析包时出现问题」在国产 ROM 上并不是一个根因，而是一组根因共用的提示语。
+这一节把四个成因逐个消掉。
+
+### 10.1 分 ABI 拆包：54 MB → 21 MB
+
+`flutter build apk` 默认产出 universal 包，把 `arm64-v8a` / `armeabi-v7a` / `x86_64`
+三套引擎全塞进去。一部 arm64 手机实际只会用到其中一套，另外两套（约 30 MB）纯属陪跑。
+但包越大，国内网络下载中断的概率越高，而**下载不完整正是这个报错最常见的成因**。
+
+v1.4.0 起 `scripts/build_release.sh` 用 `--split-per-abi` 出两个包：
+
+| 产物 | 覆盖 | 体积 |
+| --- | --- | --- |
+| `...-arm64-v8a.apk` | 2016 年后的绝大多数手机 | ≈21 MB |
+| `...-armeabi-v7a.apk` | 32 位老设备 / 低端机 | ≈19 MB |
+
+`x86_64` 直接丢弃（只有模拟器会用）。代价是发布页有两只包，必须让用户选对——
+而"让用户选"本身就是失败源，所以应用内更新会自动按 `Build.SUPPORTED_ABIS` 选包
+（`core/policy/abi_policy.dart`，见 11.3）。
+
+### 10.2 签名与对齐：把三种"结构性坏包"挡在发布前
+
+`scripts/sign_apk.sh` 现在的签名参数：
+
+* `--v1-signing-enabled true`：**缺 v1 的包，部分国产 ROM 的安装器直接判"包损坏"**。
+* `--v2-signing-enabled true`、`--v3-signing-enabled true`：Android 7+ / 9+ 的主通道，
+  三者可以共存，不影响老设备。
+* 不开 v4：v4 需要同目录的 `.idsig` 文件，侧载场景反而容易缺件。
+* `--min-sdk-version 24 --max-sdk-version 36` 显式传入：让 apksigner 自己读清单，
+  万一读到错的 minSdk 会选错 v1 摘要算法。
+* `zipalign -P 16 -p -f 4`：16 KB 页对齐（build-tools 35+ 才有 `-P`，脚本会探测后回退）。
+
+签完立刻 `apksigner verify --min-sdk-version 24`，验不过就 `exit 1`——
+自己都不认的包不允许进 Release。
+
+### 10.3 发布前结构体检（`scripts/verify_apk.py`）
+
+`apksigner verify` 只校验证书与签名块，不关心 zip 内部布局。而下面任何一条都会让
+安装器报同一句"解析包时出现问题"：
+
+| 检查项 | 不通过的后果 |
+| --- | --- |
+| `resources.arsc` 必须 `STORED` 且 4 字节对齐 | Android 11+ 报 `INSTALL_PARSE_FAILED_RESOURCES_ARSC_COMPRESSED` |
+| `lib/**/*.so` 必须 `STORED` | `extractNativeLibs=false` 时安装器直接拒绝 |
+| 存在 `META-INF/*.RSA` | 缺 v1 签名，国产 ROM 判包损坏 |
+| 中央目录前存在 `APK Sig Block 42` | 缺 v2/v3，Android 7+ 拒绝安装 |
+| `zip.testzip()` 通过、单条目 < 200 MB | 下载截断 / 结构损坏 |
+
+体检脚本在 `build_release.sh` 末尾执行，非 0 退出即整条流水线红。
+
+### 10.4 应用内更新也要防"坏包"
+
+`NativeApkInstaller.downloadAndInstall` 现在有三道闸：
+
+1. **长度比对**：`received != contentLength` 直接删包，提示"下载不完整"，
+   而不是把半截包交给安装器；
+2. **哈希比对**：与 `SHA256SUMS.txt` 不一致即丢弃（清单取不到也停止安装，
+   不再"查不到就跳过校验"）；
+3. **解析预检**：`PackageManager.getPackageArchiveInfo()` 先让系统解析一遍，
+   返回 null 就说明包本身有问题——当场删掉并说明原因，
+   不让用户对着系统那句没有线索的「解析包时出现问题」发懵。
+
+### 10.5 运行期资源占用
+
+| 措施 | 位置 | 效果 |
+| --- | --- | --- |
+| 前后台生命周期释放相机、定位、指南针、授时轮询 | `CaptureController.didChangeAppLifecycleState` | 后台不再持有预览纹理与 GPS 唤醒锁；只在 `paused` 动手，避免下拉通知栏就闪黑 |
+| 九宫格缩略图按 512 px 解码 | `gallery_page.dart` | 一张 4000×3000 全尺寸解码要 48 MB 堆，缩略图只需 0.8 MB |
+| 详情页限宽 2048 px 解码 | 同上 | 48 MB → 12 MB |
+| `ImageCache` 上限压到 48 MB / 60 张 | `main.dart` | 默认 100 MB 对中端机偏大，容易和相机缓冲抢内存 |
+
+---
+
+## 11. 设备与机型适配（v1.3.0）
 
 现场拍照类应用最容易被投诉的不是功能少，而是"在我这台机器上不对"。这一节记录三类
 差异的收敛方式。
 
-### 10.1 预览与成片的画幅对齐（`core/layout/frame_fit.dart`）
+### 11.1 预览与成片的画幅对齐（`core/layout/frame_fit.dart`）
 
 问题：取景框尺寸由**屏幕**决定（19.5:9 / 20:9 / 平板 4:3），成片尺寸由**传感器**决定
 （通常 4:3）。如果水印按"屏幕尺寸"排版，同一套模板在不同手机上位置和字号都会不同，
@@ -349,7 +425,7 @@ abstract class FeatureModule {
 `FrameFit` 是纯 Dart（只依赖 `LayoutSize`/`LayoutRect`），所以能在单测里覆盖留边、
 裁切、坐标互转与零尺寸退化，不必上真机。
 
-### 10.2 取景模式：留边 / 铺满
+### 11.2 取景模式：留边 / 铺满
 
 `settings.previewFill` 控制：
 
@@ -361,7 +437,7 @@ abstract class FeatureModule {
 两种模式下**水印位置都以成片为准**，所以铺满时如果水印落在被裁掉的边缘，预览里看到的
 位置就是它在成片里的位置——不会出现"预览里有、成片里偏了"。
 
-### 10.3 方位角（`core/policy/heading.dart` + `engines/sensor/compass_engine.dart`）
+### 11.3 方位角（`core/policy/heading.dart` + `engines/sensor/compass_engine.dart`）
 
 * 传感器走原生 `SensorManager`：优先 `TYPE_ROTATION_VECTOR`（厂商融合，免"8 字校准"），
   老设备退回加速度计 + 磁力计；两者都没有时 `hasCompass` 直接返回 false。
@@ -373,7 +449,7 @@ abstract class FeatureModule {
   绝不按 0°（正北）或上一次读数编造。传感器精度差于 ±25° 时补「（精度低）」。
 * 朝向在**快门瞬间冻结**，与时间、坐标一样进入 `CaptureContext`，转身不会改变水印。
 
-### 10.4 设备能力探测与按钮降级
+### 11.4 设备能力探测与按钮降级
 
 | 能力 | 探测方式 | 不可用时 |
 | --- | --- | --- |
@@ -385,7 +461,7 @@ abstract class FeatureModule {
 相机初始化失败按原因分类给出处置建议（缺权限 / 被占用 / 无摄像头），而不是把
 插件抛出的英文原文丢给用户。
 
-### 10.5 水印位置与角标
+### 11.5 水印位置与角标
 
 `WatermarkPosition` 四种：`bottomBar` / `bottomLeft` / `bottomRight` / `topBar`。
 

@@ -187,6 +187,10 @@ class GalleryPageState extends State<GalleryPage> {
                           Image.file(
                             File(photo.path),
                             fit: BoxFit.cover,
+                            // 缩略图按目标宽度解码：一张 4000×3000 的原图
+                            // 全尺寸解码要 48 MB 堆，九宫格滚两屏就够把中端机
+                            // 顶到 OOM。512 px 在 3 列网格里已经看不出差别。
+                            cacheWidth: 512,
                             errorBuilder: (_, __, ___) => const ColoredBox(
                               color: Color(0xFF1E1E1E),
                               child: Icon(Icons.broken_image_outlined),
@@ -364,7 +368,13 @@ class _PhotoDetailPageState extends State<PhotoDetailPage> {
         children: [
           AspectRatio(
             aspectRatio: 4 / 3,
-            child: Image.file(File(photo.path), fit: BoxFit.contain),
+            // 详情页只需要"看得清"，不需要"逐像素还原"。
+            // 限制在 2048 宽：1080p / 2K 屏都够锐，堆占用从 48 MB 降到 12 MB。
+            child: Image.file(
+              File(photo.path),
+              fit: BoxFit.contain,
+              cacheWidth: 2048,
+            ),
           ),
           if (_verifying) const LinearProgressIndicator(),
           if (_report != null) _ReportCard(report: _report!),

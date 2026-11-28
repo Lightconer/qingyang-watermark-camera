@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../../core/policy/abi_policy.dart';
 import '../../core/policy/version.dart';
 
 /// 远端发布的一条记录（当前只认 GitHub Releases）。
@@ -17,6 +18,7 @@ class UpdateRelease {
     required this.apkSizeBytes,
     required this.checksumUrl,
     required this.publishedAt,
+    this.apkAssetCount = 1,
   });
 
   final String tag;
@@ -33,6 +35,10 @@ class UpdateRelease {
 
   final DateTime? publishedAt;
 
+  /// 发布里一共带了几个安装包。多 ABI 拆包后通常 ≥2，用于给用户解释
+  /// "为什么这次只有 20 MB"。
+  final int apkAssetCount;
+
   String get sizeLabel {
     if (apkSizeBytes <= 0) return '未知大小';
     final mb = apkSizeBytes / (1024 * 1024);
@@ -41,9 +47,16 @@ class UpdateRelease {
 
   /// 从 GitHub Releases API 的单条记录解析。
   ///
-  /// 找不到 APK 附件时返回 null——宁可提示"该发布没有安装包"，
+  /// [deviceAbis] 交给 ABI 选择策略：按 ABI 拆包后同一版本有多个 `.apk`，
+  /// 盲目取第一个会把 arm64 包装进 32 位设备（`NO_MATCHING_ABIS`），
+  /// 用户看到的只是「安装失败」，根本没法自查。
+  ///
+  /// 找不到可用 APK 时返回 null——宁可提示「该发布没有安装包 / 没有适配本机的包」，
   /// 也不要给现场人员一个打不开的更新入口。
-  static UpdateRelease? fromGitHubJson(Map<String, dynamic> json) {
+  static UpdateRelease? fromGitHubJson(
+    Map<String, dynamic> json, {
+    List<String> deviceAbis = const [],
+  }) {
     final tag = (json['tag_name'] as String?)?.trim() ?? '';
     final version = AppVersion.tryParse(tag);
     if (version == null) return null;
@@ -52,17 +65,24 @@ class UpdateRelease {
         .whereType<Map<String, dynamic>>()
         .toList();
 
-    Map<String, dynamic>? apk;
-    for (final asset in assets) {
-      final name = (asset['name'] as String?)?.toLowerCase() ?? '';
-      if (!name.endsWith('.apk')) continue;
-      // 优先挑带应用标识的那个，避免把 debug/其它变体当成更新包
-      if (name.contains('qingyang')) {
-        apk = asset;
-        break;
-      }
-      apk ??= asset;
-    }
+    // 先筛出所有 .apk，再由策略挑最合适的一只。
+    // 带 qingyang 的优先：仓库里同时挂测试包/示例包时不至于抓错。
+    final apks = assets
+        .where((asset) =>
+            (asset['name'] as String?)?.toLowerCase().endsWith('.apk') ?? false)
+        .toList();
+    if (apks.isEmpty) return null;
+    final branded = apks
+        .where((asset) =>
+            ((asset['name'] as String?) ?? '').toLowerCase().contains('qingyang'))
+        .toList();
+    final pool = branded.isEmpty ? apks : branded;
+
+    final apk = ApkAssetPolicy.pick(
+      pool,
+      (asset) => (asset['name'] as String?) ?? '',
+      deviceAbis,
+    );
     if (apk == null) return null;
 
     String? checksumUrl;
@@ -88,6 +108,7 @@ class UpdateRelease {
       apkSizeBytes: (apk['size'] as num?)?.toInt() ?? 0,
       checksumUrl: checksumUrl,
       publishedAt: published,
+      apkAssetCount: pool.length,
     );
   }
 
@@ -102,6 +123,7 @@ class UpdateRelease {
         apkSizeBytes: apkSizeBytes,
         checksumUrl: checksumUrl ?? this.checksumUrl,
         publishedAt: publishedAt,
+        apkAssetCount: apkAssetCount,
       );
 }
 
@@ -173,6 +195,7 @@ abstract class UpdateEngine {
   Future<UpdateCheckResult> check({
     required String currentVersion,
     required String repo,
+    List<String> deviceAbis = const [],
   });
 
   /// 拉取纯文本（用于 `SHA256SUMS.txt`）。
@@ -190,6 +213,7 @@ class GitHubUpdateEngine implements UpdateEngine {
   Future<UpdateCheckResult> check({
     required String currentVersion,
     required String repo,
+    List<String> deviceAbis = const [],
   }) async {
     final current = AppVersion.tryParse(currentVersion);
     if (current == null) {
@@ -236,11 +260,15 @@ class GitHubUpdateEngine implements UpdateEngine {
       if (decoded is! Map<String, dynamic>) {
         return UpdateCheckResult.failed(currentVersion, '发布记录格式异常');
       }
-      final release = UpdateRelease.fromGitHubJson(decoded);
+      final release = UpdateRelease.fromGitHubJson(decoded, deviceAbis: deviceAbis);
       if (release == null) {
+        final hasAnyApk = (decoded['assets'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .any((asset) =>
+                (asset['name'] as String?)?.toLowerCase().endsWith('.apk') ?? false);
         return UpdateCheckResult.failed(
           currentVersion,
-          '该发布没有可用的 APK 安装包',
+          hasAnyApk ? '该发布没有适配本机（${deviceAbis.join('/')}）的安装包' : '该发布没有可用的 APK 安装包',
         );
       }
       if (release.version.isNewerThan(current)) {
@@ -300,6 +328,7 @@ class FakeUpdateEngine implements UpdateEngine {
   Future<UpdateCheckResult> check({
     required String currentVersion,
     required String repo,
+    List<String> deviceAbis = const [],
   }) async {
     checkCount++;
     if (throwOnCheck) throw StateError('boom');

@@ -12,24 +12,57 @@
 ## 下载与安装
 
 APK 由 GitHub Releases 直接提供（每次发版自动构建）。当前最新版本：
-[**v1.0.0**](../../releases/tag/v1.0.0)（APK + `SHA256SUMS.txt`）。
+[**v1.4.0**](../../releases/tag/v1.4.0)（分架构 APK + `SHA256SUMS.txt`）。
 
-安装步骤：
+### 该下哪个包
 
-1. 打开 [Releases](../../releases) 页面，下载最新的 `qingyang-watermark-vX.Y.Z.apk`；
-2. 手机允许「安装未知来源应用」；
-3. 安装后首次启动依次授予：**精确定位** → **相机** → **存储/相册**（Android 13+ 走系统 Photo Picker，不需要媒体权限）；
+从 v1.4.0 起按 CPU 架构拆包——通用包会把三套 Flutter 引擎全塞进来，
+54 MB 里有近 30 MB 是这台手机永远用不到的另一套 native 库。拆开后单包只有 21 MB 左右，
+下载中断（也就是「解析包时出现问题」最常见的成因）的概率随之大幅下降。
+
+| 文件 | 适用设备 | 体积 |
+| --- | --- | --- |
+| `qingyang-watermark-vX.Y.Z-arm64-v8a.apk` | **绝大多数手机**（2016 年以后的机型，首选） | 约 21 MB |
+| `qingyang-watermark-vX.Y.Z-armeabi-v7a.apk` | 32 位老设备 / 低端机（arm64 包装不上时再用） | 约 19 MB |
+
+拿不准就下 `arm64-v8a`。**装错了不会损坏任何数据**，系统只会提示「应用未安装」或
+「解析包时出现问题」，换另一个包即可。
+
+### 安装步骤
+
+1. 打开 [Releases](../../releases) 页面，按上表下载对应的 `.apk`；
+2. 手机允许「安装未知来源应用」（给浏览器或文件管理器授权，不是给本应用）；
+3. 安装后首次启动依次授予：**精确定位** → **相机** → **存储/相册**
+   （Android 13+ 走系统 Photo Picker，不需要媒体权限）；
 4. 校验安装包（可选）：
 
 ```bash
 sha256sum -c SHA256SUMS.txt
 ```
 
-系统要求：Android 7.0（API 24）及以上；相机、GPS。鸿蒙（HarmonyOS NEXT 之前的双框架版本）可直接安装运行。
+### 报「解析包时出现问题」怎么办
 
-> 当前流水线状态：`CI`（analyze + test）与 `Build APK` 在 `main` 上均为通过；
-> `release.yml` 已实测可用（v1.0.0 由打标签自动产出）。APK 尚未在真机上做完整
-> 功能回归，相机/导入/校验三条链路建议按 `docs/ARCHITECTURE.md` 的验收点自测。
+按可能性从高到低排查：
+
+1. **下载不完整**（最常见）。GitHub 在国内访问不稳，54 MB 的包断在一半就是这种报错。
+   换成体积更小的 `arm64-v8a` 包重下，或用下载工具续传；下完先对 `SHA256SUMS.txt` 校验。
+2. **装错了架构**。32 位设备装 arm64 包。换 `armeabi-v7a` 包。
+3. **ROM 拦截**。荣耀 / 华为 / 小米 / OPPO 的「纯净模式」「应用管控」会静默改写安装流程：
+   - 荣耀 MagicOS：设置 → 安全 → 更多安全设置 → 外部来源应用下载 → 允许对应应用；
+     关掉「纯净模式」（设置 → 安全和隐私 → 纯净模式）。
+   - 小米 HyperOS：设置 → 应用设置 → 授权管理 → 未知来源安装。
+4. **系统版本低于 Android 7.0**。本应用最低 API 24。
+
+自 v1.4.0 起，应用内更新会先让系统解析一遍下载好的包，坏了当场删掉并说明原因，
+不会再把「解析包时出现问题」这种没有线索的提示丢给用户。
+
+系统要求：Android 7.0（API 24）及以上；相机、GPS。
+鸿蒙（HarmonyOS NEXT 之前的双框架版本）可直接安装运行。
+
+> 当前流水线状态：`CI`（analyze + test）、`Build APK`、`Release` 均为通过。
+> 发版产物在发布前会跑一遍结构体检（`scripts/verify_apk.py`）：
+> `resources.arsc` 必须未压缩且 4 字节对齐、native 库必须 STORED、
+> v1/v2/v3 签名必须齐全——任何一项不过，流水线直接红，不产出装不上的包。
 
 ---
 
@@ -38,8 +71,8 @@ sha256sum -c SHA256SUMS.txt
 | 流水线 | 触发 | 做什么 |
 | --- | --- | --- |
 | `ci.yml` | push `main`、PR | `bootstrap_android.sh` → `flutter analyze --no-fatal-infos --no-fatal-warnings` → `flutter test` |
-| `build-apk.yml` | push `main`、PR、手动 | 构建 release APK → `zipalign` + `apksigner` 重签 → 上传 Actions 构件（保留 14 天） |
-| `release.yml` | 推送 `v*` 标签、手动填版本号 | 构建 → 重签 → 生成 `qingyang-watermark-vX.Y.Z.apk` 与 `SHA256SUMS.txt` → 发布 GitHub Release |
+| `build-apk.yml` | push `main`、PR、手动 | `scripts/build_release.sh`：分 ABI 构建 → zipalign + apksigner 重签 → 结构体检 → 上传 Actions 构件（保留 14 天） |
+| `release.yml` | 推送 `v*` 标签、手动填版本号 | 同上，产物为 `qingyang-watermark-vX.Y.Z-{arm64-v8a,armeabi-v7a}.apk` 与 `SHA256SUMS.txt` → 发布 GitHub Release |
 
 仓库**不提交 `android/` 目录**：三条流水线都会先跑 `scripts/bootstrap_android.sh`，
 用 `flutter create --org com.qingyang --project-name watermark` 现场生成平台骨架
@@ -100,11 +133,24 @@ base64 -w0 release.jks   # 复制输出到 KEYSTORE_BASE64
 
 **未配置时**：`bootstrap_android.sh` 会清理 `key.properties` 并打印
 `警告：未配置 KEYSTORE_BASE64，release 将回退调试签名`；`sign_apk.sh` 检测不到证书时
-自动跳过重签，产物保持 Flutter 的调试签名——可安装，但不适合正式分发。
+自动跳过重签并直接复制产物（构建不中断）。
 
-签名统一在构建末尾做（`zipalign -p -f 4` + `apksigner sign`，v1/v2 同时开启），
+⚠️ **务必配置这四个 Secret**：未配置时 CI 用的是 Flutter 在临时容器里现生成的调试证书，
+**每次构建都不一样**。后果是用户装过一版就再也覆盖不了下一版——系统会报
+「应用未安装」或「与已安装应用签名不一致」，而且这和「解析包时出现问题」很容易被混淆。
+配置之后每次发布的证书指纹相同，升级才是连续的。
+
+签名统一在构建末尾做（`zipalign -P 16 -p -f 4` + `apksigner sign`，
+zipalign 与 apksigner 逐项加固的原因见 `docs/ARCHITECTURE.md` 第 10.2 节），
 不在 Gradle 里配置 `signingConfigs`，这样无论平台目录是 Kotlin DSL 还是 Groovy DSL
 生成，签名链路都只有一条、可复现。
+
+### 发版前自检
+
+```bash
+bash scripts/build_release.sh 1.4.0 1     # 构建 + 签名 + 结构体检，产物在 dist/
+python3 scripts/verify_apk.py dist/*.apk  # 单独体检已有产物
+```
 
 ---
 

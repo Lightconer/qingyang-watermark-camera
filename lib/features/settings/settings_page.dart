@@ -629,7 +629,20 @@ class _UpdateSectionState extends State<_UpdateSection> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('当前版本 ${_current ?? '-'} · 安装包 ${release.sizeLabel}'),
+              Text('当前版本 ${_current ?? '-'}'),
+              const SizedBox(height: 4),
+              Text(
+                '将下载 ${release.apkName}（${release.sizeLabel}）',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              if (release.apkAssetCount > 1) ...[
+                const SizedBox(height: 2),
+                Text(
+                  '发布里带了 ${release.apkAssetCount} 个安装包，已按本机架构挑出匹配的那一个；'
+                  '选对包安装成功率最高。',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
               const SizedBox(height: 12),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 220),

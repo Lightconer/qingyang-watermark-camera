@@ -250,6 +250,121 @@ void main() {
     });
   });
 
+  group('多 ABI 拆包后的资产选择', () {
+    Map<String, dynamic> multiAbiJson() => {
+          'tag_name': 'v1.4.0',
+          'name': '青阳水印相机 v1.4.0',
+          'body': '',
+          'html_url': 'https://github.com/x/y/releases/tag/v1.4.0',
+          'published_at': '2026-11-28T01:00:00Z',
+          'assets': [
+            {
+              'name': 'qingyang-watermark-v1.4.0-armeabi-v7a.apk',
+              'size': 20000000,
+              'browser_download_url': 'https://e/v7a.apk',
+            },
+            {
+              'name': 'qingyang-watermark-v1.4.0-arm64-v8a.apk',
+              'size': 22000000,
+              'browser_download_url': 'https://e/arm64.apk',
+            },
+            {
+              'name': 'SHA256SUMS.txt',
+              'size': 120,
+              'browser_download_url': 'https://e/SHA256SUMS.txt',
+            },
+          ],
+        };
+
+    test('arm64 手机挑 arm64 包，不会下到 32 位包', () {
+      final release = UpdateRelease.fromGitHubJson(
+        multiAbiJson(),
+        deviceAbis: ['arm64-v8a', 'armeabi-v7a'],
+      )!;
+      expect(release.apkName, endsWith('arm64-v8a.apk'));
+      expect(release.apkAssetCount, 2);
+    });
+
+    test('32 位手机挑 v7a 包', () {
+      final release = UpdateRelease.fromGitHubJson(
+        multiAbiJson(),
+        deviceAbis: ['armeabi-v7a', 'armeabi'],
+      )!;
+      expect(release.apkName, endsWith('armeabi-v7a.apk'));
+    });
+
+    test('本机一个包都装不上时返回 null，交给上层明说', () {
+      expect(
+        UpdateRelease.fromGitHubJson(multiAbiJson(), deviceAbis: ['x86_64']),
+        isNull,
+      );
+    });
+
+    test('拿不到设备 ABI 时仍有包可用（选通用性最高的）', () {
+      final release = UpdateRelease.fromGitHubJson(multiAbiJson())!;
+      expect(release.apkName, endsWith('.apk'));
+    });
+  });
+
+  group('安装前的清单校验', () {
+    late SettingsStore settings;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      settings = await SettingsStore.load();
+    });
+
+    UpdateRelease release() => UpdateRelease.fromGitHubJson(_releaseJson())!;
+    final otherSha = 'b'.padRight(64, 'b');
+
+    test('清单里没有这只包的哈希时拒绝安装', () async {
+      final installer = FakeApkInstaller();
+      final service = UpdateService(
+        engine: FakeUpdateEngine(
+          text: '$otherSha  qingyang-watermark-v1.4.0-arm64-v8a.apk\n'
+              '$otherSha  qingyang-watermark-v1.4.0-armeabi-v7a.apk\n',
+        ),
+        installer: installer,
+        settings: settings,
+      );
+
+      final result = await service.installRelease(release());
+      expect(result.ok, isFalse);
+      expect(result.status, ApkInstallStatus.checksumMismatch);
+      // 关键：一个字节都不应该下，更不能把未校验的包交给安装器
+      expect(installer.installs, isEmpty);
+    });
+
+    test('清单下载失败时停止安装，不放行未校验的包', () async {
+      final installer = FakeApkInstaller();
+      final service = UpdateService(
+        engine: FakeUpdateEngine(), // fetchText 返回 null
+        installer: installer,
+        settings: settings,
+      );
+
+      final result = await service.installRelease(release());
+      expect(result.ok, isFalse);
+      expect(result.status, ApkInstallStatus.downloadFailed);
+      expect(installer.installs, isEmpty);
+    });
+
+    test('清单里有多只包时按文件名取到正确的那条哈希', () async {
+      final installer = FakeApkInstaller();
+      final service = UpdateService(
+        engine: FakeUpdateEngine(
+          text: '$otherSha  qingyang-watermark-v1.4.0-arm64-v8a.apk\n'
+              '$_apkSha  qingyang-watermark-v1.2.0.apk\n',
+        ),
+        installer: installer,
+        settings: settings,
+      );
+
+      await service.installRelease(release());
+      expect(installer.installs.single.sha, _apkSha);
+    });
+  });
+
   group('发布 JSON 解析边界', () {
     test('assets 缺失时不崩', () {
       final json = {

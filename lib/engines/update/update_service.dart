@@ -38,11 +38,15 @@ class UpdateService {
 
   /// 手动检查（不写节流时间以外的副作用）。
   Future<UpdateCheckResult> checkNow({String? currentVersion}) async {
+    // 设备 ABI 决定挑哪只包：arm64 / armeabi-v7a 拆包发布后，
+    // 这一步漏了就会给 32 位机器推 arm64 包。
+    final abis = await installer.supportedAbis();
     late final UpdateCheckResult result;
     try {
       result = await engine.check(
         currentVersion: currentVersion ?? await currentVersionLabel(),
         repo: settings.updateRepo,
+        deviceAbis: abis,
       );
     } catch (error) {
       return UpdateCheckResult.failed(currentVersion ?? AppIdentity.version, '$error');
@@ -63,25 +67,39 @@ class UpdateService {
   }
 
   /// 下载并安装；[onProgress] 用于页面进度条。
+  ///
+  /// 清单必须能取到、且必须能查到这只包的哈希才继续：
+  /// 「查不到就跳过校验」等于把安全校验做成了可选项。
   Future<ApkInstallResult> installRelease(
     UpdateRelease release, {
     void Function(int received, int total)? onProgress,
   }) async {
-    final expected = await _expectedSha256(release);
+    final url = release.checksumUrl;
+    String? expected;
+    if (url != null && url.isNotEmpty) {
+      final text = await engine.fetchText(url);
+      if (text == null) {
+        return const ApkInstallResult(
+          ApkInstallStatus.downloadFailed,
+          '取不到校验清单（SHA256SUMS.txt），已停止安装。'
+          '可到发布页手动下载，那里同样带校验清单。',
+        );
+      }
+      expected = ChecksumFile.lookup(text, release.apkName);
+      if (expected == null) {
+        return const ApkInstallResult(
+          ApkInstallStatus.checksumMismatch,
+          '发布清单里没有这只安装包的哈希，已拒绝安装',
+        );
+      }
+    }
     return installer.downloadAndInstall(
       release,
       expectedSha256: expected,
       onProgress: onProgress,
     );
   }
-
-  /// 读取发布清单里这只 APK 的哈希；没有清单返回 null（调用方按"未校验"提示）。
-  Future<String?> _expectedSha256(UpdateRelease release) async {
-    final url = release.checksumUrl;
-    if (url == null || url.isEmpty) return null;
-    final text = await engine.fetchText(url);
-    return ChecksumFile.lookup(text, release.apkName);
-  }
+}
 
   Future<void> openReleasePage(UpdateRelease release) async {
     if (release.pageUrl.isEmpty) return;

@@ -47,6 +47,12 @@ abstract class ApkInstaller {
   /// 系统里真实的 versionName（PackageManager）；拿不到时返回 null。
   Future<String?> currentVersion();
 
+  /// 本机支持的 ABI（`Build.SUPPORTED_ABIS`，首选在前）。
+  ///
+  /// 安装包按 ABI 拆包发布，查更新时靠它挑对包；拿不到时返回空列表，
+  /// 由 [ApkAssetPolicy] 退化为"优先通用包"。
+  Future<List<String>> supportedAbis();
+
   Future<ApkInstallResult> downloadAndInstall(
     UpdateRelease release, {
     String? expectedSha256,
@@ -76,6 +82,21 @@ class NativeApkInstaller implements ApkInstaller {
       return null;
     } catch (_) {
       return null;
+    }
+  }
+
+  @override
+  Future<List<String>> supportedAbis() async {
+    try {
+      final value = await _deviceChannel.invokeMethod<List<dynamic>>('abis');
+      if (value == null) return const [];
+      return value
+          .map((item) => '$item'.trim())
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+    } catch (_) {
+      // 老版本宿主没有这个通道：交给策略退化为"优先通用包"。
+      return const [];
     }
   }
 
@@ -140,6 +161,16 @@ class NativeApkInstaller implements ApkInstaller {
         await sink.close();
       }
 
+      // 长度对不上就是下载被截断——这种包交给安装器，用户看到的
+      // 一定是「解析包时出现问题」。在这里拦下，说明白原因。
+      if (total > 0 && received != total) {
+        await target.delete();
+        return ApkInstallResult(
+          ApkInstallStatus.downloadFailed,
+          '下载不完整（$received/$total 字节），已删除，请检查网络后重试',
+        );
+      }
+
       if (expectedSha256 != null && expectedSha256.isNotEmpty) {
         final actual = await _sha256OfFile(target);
         if (!ChecksumFile.matches(expectedSha256, actual)) {
@@ -149,6 +180,19 @@ class NativeApkInstaller implements ApkInstaller {
             '安装包校验失败：哈希与发布清单不一致，已丢弃',
           );
         }
+      }
+
+      // 装之前的最后一道：让系统自己去解析这个包。
+      // 解析不了就别交给安装器——否则弹出来的是「解析包时出现问题」，
+      // 用户除了重新下载没有任何线索。
+      final parsable = await _canParse(target.path);
+      if (parsable == false) {
+        await target.delete();
+        return const ApkInstallResult(
+          ApkInstallStatus.installFailed,
+          '安装包无法解析（下载损坏或与本机系统不兼容），已删除。'
+          '请重试；若反复失败，到发布页手动下载对应 ABI 的安装包。',
+        );
       }
 
       await _updateChannel.invokeMethod<void>('install', {'path': target.path});
@@ -184,6 +228,24 @@ class NativeApkInstaller implements ApkInstaller {
     final digest = await sha256.bind(file.openRead()).first;
     return digest.toString();
   }
+
+  /// 让系统解析一次这个 APK。
+  ///
+  /// 返回 null 表示宿主没有实现该方法（老版本 / 桌面），此时跳过预检，
+  /// 保持旧行为；返回 false 才是"确实解析不了"。
+  static Future<bool?> _canParse(String path) async {
+    try {
+      final info = await _updateChannel
+          .invokeMapMethod<String, dynamic>('inspect', {'path': path});
+      return info != null;
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 /// 测试替身：不联网、不落地。
@@ -195,6 +257,7 @@ class FakeApkInstaller implements ApkInstaller {
   });
 
   String? version;
+  List<String> abis = const ['arm64-v8a', 'armeabi-v7a'];
   ApkInstallStatus status;
   String message;
 
@@ -203,6 +266,9 @@ class FakeApkInstaller implements ApkInstaller {
 
   @override
   Future<String?> currentVersion() async => version;
+
+  @override
+  Future<List<String>> supportedAbis() async => abis;
 
   @override
   Future<ApkInstallResult> downloadAndInstall(

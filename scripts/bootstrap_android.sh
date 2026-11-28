@@ -318,6 +318,9 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "model" -> result.success("${Build.MANUFACTURER} ${Build.MODEL}")
                     "version" -> result.success(versionName())
+                    // 安装包已按 ABI 拆分：更新时必须挑到与本机匹配的那一只，
+                    // 否则会下到 arm64 包装进 32 位设备，报 NO_MATCHING_ABIS。
+                    "abis" -> result.success(Build.SUPPORTED_ABIS.toList())
                     else -> result.notImplemented()
                 }
             }
@@ -387,6 +390,33 @@ class MainActivity : FlutterActivity() {
                                 result.success(true)
                             } catch (error: Exception) {
                                 result.error("open_failed", error.message ?: "无法打开链接", null)
+                            }
+                        }
+                    }
+                    // 安装前预检：让系统的解析器先看一眼这个包。
+                    // 解析不出来就直接告诉 Dart 侧「包坏了」，
+                    // 而不是把包丢给安装器、让用户对着「解析包时出现问题」发懵。
+                    "inspect" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrBlank()) {
+                            result.success(null)
+                        } else {
+                            try {
+                                val info = packageManager.getPackageArchiveInfo(path, 0)
+                                if (info == null) {
+                                    result.success(null)
+                                } else {
+                                    result.success(
+                                        mapOf(
+                                            "packageName" to info.packageName,
+                                            "versionName" to info.versionName,
+                                            "versionCode" to info.longVersionCode
+                                        )
+                                    )
+                                }
+                            } catch (error: Exception) {
+                                // 解析器本身抛异常（包结构损坏）也按"解析不了"处理
+                                result.success(null)
                             }
                         }
                     }
