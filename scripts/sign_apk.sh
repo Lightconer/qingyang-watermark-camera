@@ -88,15 +88,17 @@ fi
 # 与 Google Play 的 16 KB 要求都指向它；老 build-tools 不认识该参数，
 # 探测后回退 4 KB 页对齐，保证两种环境下脚本都能跑。
 ALIGNED="$APK_PATH.aligned"
-ALIGN_ARGS=(-f 4)
-if "$ZIPALIGN" -h 2>&1 | grep -q -- '-P'; then
-  ALIGN_ARGS=(-P 16 -p "${ALIGN_ARGS[@]}")
-  echo "[sign] 使用 16 KB 页对齐"
+rm -f "$ALIGNED"
+# 先按 16 KB 页对齐真跑一次：能跑通就用它，跑不通再退 4 KB。
+# 不去猜 `-h` 的输出格式——不同 build-tools 的用法文本写法不一致，
+# 猜错的结果是「以为不支持」，于是新机装不上还查不出原因。
+if "$ZIPALIGN" -P 16 -p -f 4 "$APK_PATH" "$ALIGNED" >/dev/null 2>&1; then
+  echo "[sign] 已按 16 KB 页对齐（Android 15+ 新机型要求）"
 else
-  ALIGN_ARGS=(-p "${ALIGN_ARGS[@]}")
-  echo "[sign] build-tools 不支持 -P，回退 4 KB 页对齐"
+  rm -f "$ALIGNED"
+  "$ZIPALIGN" -p -f 4 "$APK_PATH" "$ALIGNED"
+  echo "[sign] 当前 build-tools 不支持 -P，回退 4 KB 页对齐"
 fi
-"$ZIPALIGN" "${ALIGN_ARGS[@]}" "$APK_PATH" "$ALIGNED"
 rm -f "$APK_PATH"
 mv "$ALIGNED" "$APK_PATH"
 

@@ -106,6 +106,23 @@ def check(path):
         abis = sorted({n.split("/")[1] for n in sos if n.count("/") >= 2})
         rep.info(f"ABI: {', '.join(abis) if abis else '无'}")
 
+        # native 库对齐粒度：16 KB 页是新机型的要求，4 KB 是旧标准。
+        # 只报告不判错——build-tools 太老时回退 4 KB 是预期行为。
+        so_offsets = []
+        for name in sos:
+            info = zf.getinfo(name)
+            offset = info.header_offset
+            name_len = struct.unpack("<H", raw[offset + 26:offset + 28])[0]
+            extra_len = struct.unpack("<H", raw[offset + 28:offset + 30])[0]
+            so_offsets.append(offset + 30 + name_len + extra_len)
+        if so_offsets:
+            if all(o % 16384 == 0 for o in so_offsets):
+                rep.info("native 库对齐：16 KB")
+            elif all(o % 4096 == 0 for o in so_offsets):
+                rep.info("native 库对齐：4 KB（16 KB 页设备可能装不上）")
+            else:
+                rep.fail("native 库未按 4 KB 对齐，安装器可能拒绝")
+
         # ---- 签名 ----
         has_v1 = any(
             n.startswith("META-INF/") and n.upper().endswith((".RSA", ".DSA", ".EC"))
